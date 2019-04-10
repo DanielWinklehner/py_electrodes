@@ -108,7 +108,8 @@ class PyElectrodeAssembly(object):
         for _id, _electrode in self._electrodes.items():
             display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)
 
-        display.update()
+        display.FitAll()
+        display.Repaint()
         start_display()
 
         return 0

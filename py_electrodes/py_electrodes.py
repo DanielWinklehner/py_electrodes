@@ -66,6 +66,8 @@ class PyElectrode(object):
                  voltage=0,
                  geo_str=None):
 
+        print(TEMP_DIR)
+
         self._id = uuid.uuid1()
         self._name = name
         self._voltage = voltage

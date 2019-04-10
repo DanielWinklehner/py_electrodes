@@ -246,6 +246,10 @@ class PyElectrode(object):
         self._bempp_domain = domain
 
     @property
+    def gmsh_file(self):
+        return self._gmsh_file
+
+    @property
     def id(self):
         return self._id
 

@@ -13,7 +13,16 @@ if __name__ == '__main__':
     pa = PyElectrodeAssembly("RFQ with endplates")
 
     for _fn in filenames:
+
         pe = PyElectrode(os.path.splitext(_fn)[0])
+
+        if "_y" in _fn:
+            pe.color = 'RED'
+        elif "_x" in _fn:
+            pe.color = 'BLUE'
+        else:
+            pe.color = 'GREEN'
+
         pe.generate_from_file(_fn)
         pa.add_electrode(pe)
 

@@ -5,6 +5,7 @@ import uuid
 from .py_electrodes_occ import *
 import shutil
 import time
+from OCC.Display.SimpleGui import init_display
 
 # --- Some global variables --- #
 # Display debug messages?
@@ -102,8 +103,15 @@ class PyElectrodeAssembly(object):
 
     def show(self):
 
+        display, start_display, add_menu, add_function_to_menu = init_display()
+
         for _id, _electrode in self._electrodes.items():
-            _electrode.show()
+            display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)
+
+        display.update()
+        start_display()
+
+        return 0
 
 
 class PyElectrode(object):
@@ -120,6 +128,7 @@ class PyElectrode(object):
         self._id = uuid.uuid1()
         self._name = name
         self._voltage = voltage
+        self._color = 'RED'
         self._debug = DEBUG
 
         self._originated_from = ""
@@ -130,6 +139,15 @@ class PyElectrode(object):
         if self._geo_str is not None:
             self._originated_from = "geo_str"
             self.generate_from_geo_str(self._geo_str)
+
+    @property
+    def color(self):
+        return self._color
+
+    @color.setter
+    def color(self, color):
+        assert color in ['RED', 'BLUE', 'GREEN']
+        self._color = color
 
     @property
     def id(self):

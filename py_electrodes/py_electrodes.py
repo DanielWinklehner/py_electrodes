@@ -4,6 +4,7 @@ import os
 import uuid
 from .py_electrodes_occ import *
 import shutil
+import time
 
 # --- Some global variables --- #
 # Display debug messages?
@@ -61,9 +62,53 @@ else:
 # ------------------------------------ #
 
 
+class PyElectrodeAssembly(object):
+
+    def __init__(self,
+                 name="New Assembly"):
+
+        self._name = name
+        self._electrodes = {}
+
+    @staticmethod
+    def _debug_message(*args, rank=0):
+        if RANK == rank and DEBUG:
+            print(*args)
+            sys.stdout.flush()
+        return 0
+
+    def add_electrode(self, electrode):
+
+        assert isinstance(electrode, PyElectrode), "Can only add PyElectrode objects to PyElectrodeAssembly!"
+
+        self._electrodes[electrode.id] = electrode
+
+    def points_inside(self, _points):
+
+        _ts = time.time()
+
+        self._debug_message("\n*** Calculating is_inside for {} points ***".format(_points.shape[0]))
+
+        _mask = np.zeros(_points.shape[0], dtype=bool)
+
+        for _id, _electrode in self._electrodes.items():
+
+            self._debug_message("[{}] Working on electrode object {}".format(
+                time.strftime('%H:%M:%S', time.gmtime(int(time.time() - _ts))), _electrode.name))
+
+            _mask = _mask | _electrode.points_inside(_points)
+
+        return _mask
+
+    def show(self):
+
+        for _id, _electrode in self._electrodes.items():
+            _electrode.show()
+
+
 class PyElectrode(object):
     def __init__(self,
-                 name,
+                 name="New Electrode",
                  voltage=0,
                  geo_str=None):
 
@@ -97,6 +142,13 @@ class PyElectrode(object):
     @property
     def voltage(self):
         return self._voltage
+
+    @staticmethod
+    def _debug_message(*args, rank=0):
+        if RANK == rank and DEBUG:
+            print(*args)
+            sys.stdout.flush()
+        return 0
 
     def generate_from_geo_str(self, geo_str=None):
         if geo_str is not None:
@@ -153,8 +205,7 @@ class PyElectrode(object):
             return 1
 
     def _generate_from_brep(self):
-        if DEBUG:
-            print("Generating from brep")
+        self._debug_message("Generating from brep")
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
         error = self._occ_obj.load_from_brep(self._orig_file)
@@ -165,8 +216,7 @@ class PyElectrode(object):
             return 0
 
     def _generate_from_geo(self):
-        if DEBUG:
-            print("Generating from geo")
+        self._debug_message("Generating from geo")
 
         geo_fn = self._orig_file
         brep_fn = os.path.join(TEMP_DIR, "{}.brep".format(self._id))
@@ -175,15 +225,15 @@ class PyElectrode(object):
 
         # Call gmsh to transform .geo file to .brep
         command = "{} \"{}\" -0 -o \"{}\" -format brep".format(GMSH_EXE, geo_fn, brep_fn)
-        if self._debug:
+        if RANK == 0 and DEBUG:
             print("Running", command)
             sys.stdout.flush()
         gmsh_success += os.system(command)
 
         if gmsh_success != 0:
 
-            print("Something went wrong with gmsh, be sure you defined "
-                  "the correct path at the beginning of the file!")
+            self._debug_message("Something went wrong with gmsh, be sure you defined "
+                                "the correct path at the beginning of the file!")
 
             return 1
 
@@ -196,8 +246,7 @@ class PyElectrode(object):
             return 0
 
     def _generate_from_stl(self):
-        if DEBUG:
-            print("Generating from stl")
+        self._debug_message("Generating from stl")
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
         error = self._occ_obj.load_from_stl(self._orig_file)
@@ -208,8 +257,7 @@ class PyElectrode(object):
             return 0
 
     def _generate_from_step(self):
-        if DEBUG:
-            print("Generating from step")
+        self._debug_message("Generating from step")
 
         print("{}: Generating from step not yet implemented!".format(self._name))
 

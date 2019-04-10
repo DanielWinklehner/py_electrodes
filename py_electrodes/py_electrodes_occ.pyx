@@ -361,30 +361,11 @@ class PyOCCElectrode(object):
 
         return np.array(mask, dtype=np.bool)
 
-    def test(self, fn=None):
-
-        if fn is None:
-            return 1
-
-        mycolors = ["RED",
-                    "YELLOW",
-                    "CYAN",
-                    "GREEN",
-                    "BLUE"]
-
-        self.load_from_brep(fn)
-
-        self.partition_z(nslices=10)
+    def show(self):
 
         display, start_display, add_menu, add_function_to_menu = init_display()
 
-        print("Partitioned bounding boxes: Limits:")
-        for i in range(self._n_s):
-            print(self._bbox_s[i].Get())
-
-        for i in range(self._n_s - 1):
-            display.DisplayShape(self._elec_s[i], color=mycolors[i % 5], update=False)
-        display.DisplayShape(self._elec_s[-1], color=mycolors[(self._n_s-1) % 5], update=True)
+        display.DisplayShape(self._elec, color="RED", update=True)
 
         start_display()
 

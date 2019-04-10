@@ -155,6 +155,14 @@ class PyElectrode(object):
         if DEBUG:
             print("Generating from brep")
 
+        self._occ_obj = PyOCCElectrode(debug=DEBUG)
+        error = self._occ_obj.load_from_brep(self._orig_file)
+
+        if error:
+            return error
+        else:
+            return 0
+
     def _generate_from_geo(self):
         if DEBUG:
             print("Generating from geo")
@@ -166,6 +174,13 @@ class PyElectrode(object):
     def _generate_from_step(self):
         if DEBUG:
             print("Generating from step")
+
+    def show(self):
+
+        if self._occ_obj is not None:
+            self._occ_obj.show()
+
+        return 0
 
 #     def generate_gmsh_files(self):
 #

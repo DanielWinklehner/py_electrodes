@@ -149,7 +149,7 @@ class PyElectrodeAssembly(object):
 
                 _vertices = mesh.leaf_view.vertices
                 _elements = mesh.leaf_view.elements
-                _domain_ids = np.ones(mesh.leaf_view.domain_indices.shape, int) * domain_counter
+                _domain_ids = np.ones(len(mesh.leaf_view.domain_indices), int) * domain_counter
 
                 vertices = np.concatenate((vertices, _vertices), axis=1)
                 elements = np.concatenate((elements, _elements + vertex_counter), axis=1)

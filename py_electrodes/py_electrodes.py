@@ -4,8 +4,6 @@ import os
 import uuid
 from .py_electrodes_occ import *
 import shutil
-import time
-from OCC.Display.SimpleGui import init_display
 
 # --- Some global variables --- #
 # Display debug messages?
@@ -31,6 +29,27 @@ GMSH_EXE = "gmsh"
 
 __author__ = "Daniel Winklehner"
 __doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""
+
+# --- Test if we have OCC and Viewer
+HAVE_OCC = False
+try:
+    from OCC.Display.SimpleGui import init_display
+    HAVE_OCC = True
+except ImportError:
+    init_display = None
+    if DEBUG:
+        print("Something went wrong during OCC import. No OpenCasCade support outside gmsh possible!")
+
+# --- Try importing BEMPP
+HAVE_BEMPP = False
+try:
+    import bempp.api
+    from bempp.api.shapes.shapes import __generate_grid_from_geo_string as generate_from_string
+    HAVE_BEMPP = True
+except ImportError:
+    print("Couldn't import BEMPP, no meshing or BEM field calculation will be possible.")
+    bempp = None
+    generate_from_string = None
 
 # --- Try importing mpi4py, if it fails, we fall back to single processor
 try:
@@ -70,6 +89,7 @@ class PyElectrodeAssembly(object):
 
         self._name = name
         self._electrodes = {}
+        self._full_mesh = None  # BEMPP full mesh
 
     @staticmethod
     def _debug_message(*args, rank=0):
@@ -101,7 +121,69 @@ class PyElectrodeAssembly(object):
 
         return _mask
 
+    def get_bempp_mesh(self):
+
+        if not HAVE_BEMPP:
+            print("It looks like we can't find BEMPP. Aborting!")
+            return 1
+
+        # TODO: Can this be expedited using cython or multiple cores? -DW
+        if RANK == 0:
+
+            # Initialize empty arrays of the correct shape (3 x n)
+            vertices = np.zeros([3, 0])
+            elements = np.zeros([3, 0])
+            vertex_counter = 0
+            domain_counter = 1
+            domains = np.zeros([0], int)
+
+            # Domains will just be counted through from 1 to max
+            for _id, _electrode in self._electrodes.items():
+
+                # Check whether there is a individual mesh for this electrode already
+                # if not: generate it with gmsh
+                if _electrode.gmsh_file is None:
+                    _electrode.generate_mesh()
+
+                mesh = bempp.api.import_grid(_electrode.mesh_fn)
+
+                _vertices = mesh.leaf_view.vertices
+                _elements = mesh.leaf_view.elements
+                _domain_ids = np.ones(mesh.leaf_view.domain_indices.shape, int) * domain_counter
+
+                vertices = np.concatenate((vertices, _vertices), axis=1)
+                elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
+                domains = np.concatenate((domains, _domain_ids), axis=0)
+
+                # set current domain index in electrode object
+                _electrode.bempp_domain = domain_counter
+
+                # Increase the running counters
+                vertex_counter += _vertices.shape[1]
+                domain_counter += 1
+
+            self._full_mesh = {"verts": vertices,
+                               "elems": elements,
+                               "domns": domains}
+
+            if DEBUG:
+                bempp.api.grid.grid_from_element_data(vertices,
+                                                      elements,
+                                                      domains).plot()
+
+        if MPI is not None:
+            # Broadcast results to all nodes
+            self._full_mesh = COMM.bcast(self._full_mesh, root=0)
+
+            COMM.barrier()
+
+        return self._full_mesh
+
     def show(self):
+
+        if not HAVE_OCC:
+            print("OCC couldn't be loaded, no ViewScreen available!")
+            return 1
 
         display, start_display, add_menu, add_function_to_menu = init_display()
 
@@ -135,7 +217,11 @@ class PyElectrode(object):
         self._originated_from = ""
         self._orig_file = None
         self._geo_str = geo_str
+        self._geo_file = None
+        self._stl_file = None
+        self._gmsh_file = None
         self._occ_obj = None
+        self._bempp_domain = None
 
         if self._geo_str is not None:
             self._originated_from = "geo_str"
@@ -147,8 +233,17 @@ class PyElectrode(object):
 
     @color.setter
     def color(self, color):
-        assert color in ['RED', 'BLUE', 'GREEN']
+        assert color in ['RED', 'BLUE', 'GREEN'], "For now, colors are restricted to RED, BLUE, GREEN."
         self._color = color
+
+    @property
+    def bempp_domain(self):
+        return self._bempp_domain
+
+    @bempp_domain.setter
+    def bempp_domain(self, domain):
+        assert isinstance(domain, int), "Domain index for BEMPP has to be an integer!"
+        self._bempp_domain = domain
 
     @property
     def id(self):
@@ -167,6 +262,43 @@ class PyElectrode(object):
         if RANK == rank and DEBUG:
             print(*args)
             sys.stdout.flush()
+        return 0
+
+    def generate_mesh(self, brep_h=0.005):
+
+        if self._orig_file is None:
+            print("No geometry loaded yet!")
+            return 1
+
+        msh_fn = os.path.join(TEMP_DIR, "{}.msh".format(self._id))
+
+        # For now, we need to save in msh2 format for BEMPP compability
+        # gmsh can handle geo, brep and stl the same way. However, brep has no mesh resolution
+        # information. STL is already a mesh...
+        if self._originated_from == "brep":
+            command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2".format(GMSH_EXE, self._orig_file,
+                                                                             brep_h, msh_fn)
+        elif self._originated_from in ["geo_str", "geo_file", "stl"]:
+            command = "{} \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE, self._orig_file, msh_fn)
+
+        else:
+            print("Format not supported for meshing!")
+            return 1
+
+        if self._debug:
+            print("Running", command)
+            sys.stdout.flush()
+
+        gmsh_success = os.system(command)
+
+        if gmsh_success != 0:
+
+            self._debug_message("Something went wrong with gmsh, be sure you defined "
+                                "the correct path at the beginning of the file!")
+            return 1
+
+        self._gmsh_file = msh_fn
+
         return 0
 
     def generate_from_geo_str(self, geo_str=None):

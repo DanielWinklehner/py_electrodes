@@ -145,7 +145,7 @@ class PyElectrodeAssembly(object):
                 if _electrode.gmsh_file is None:
                     _electrode.generate_mesh(brep_h=brep_h)
 
-                mesh = bempp.api.import_grid(_electrode.mesh_fn)
+                mesh = bempp.api.import_grid(_electrode.gmsh_file)
 
                 _vertices = mesh.leaf_view.vertices
                 _elements = mesh.leaf_view.elements

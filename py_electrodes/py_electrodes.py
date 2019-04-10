@@ -167,6 +167,33 @@ class PyElectrode(object):
         if DEBUG:
             print("Generating from geo")
 
+        geo_fn = self._orig_file
+        brep_fn = os.path.join(TEMP_DIR, "{}.brep".format(self._id))
+
+        gmsh_success = 0
+
+        # Call gmsh to transform .geo file to .brep
+        command = "{} \"{}\" -0 -o \"{}\" -format brep".format(GMSH_EXE, geo_fn, brep_fn)
+        if self._debug:
+            print("Running", command)
+            sys.stdout.flush()
+        gmsh_success += os.system(command)
+
+        if gmsh_success != 0:
+
+            print("Something went wrong with gmsh, be sure you defined "
+                  "the correct path at the beginning of the file!")
+
+            return 1
+
+        self._occ_obj = PyOCCElectrode(debug=DEBUG)
+        error = self._occ_obj.load_from_brep(brep_fn)
+
+        if error:
+            return error
+        else:
+            return 0
+
     def _generate_from_stl(self):
         if DEBUG:
             print("Generating from stl")
@@ -182,6 +209,8 @@ class PyElectrode(object):
     def _generate_from_step(self):
         if DEBUG:
             print("Generating from step")
+
+        print("{}: Generating from step not yet implemented!".format(self._name))
 
     def show(self):
 
@@ -253,25 +282,6 @@ class PyElectrode(object):
 #             # self._mesh_fn = msh_fn
 #
 #         return 0
-
-    # def generate_occ(self):
-    #
-    #     if HAVE_OCC:
-    #
-    #         tmp_dir = self._parent.temp_dir
-    #         brep_fn = os.path.join(tmp_dir, "{}.brep".format(self._name))
-    #
-    #         self._occ_obj = PyOCCElectrode()
-    #         self._occ_obj.load_from_brep(brep_fn)
-    #         self._occ_obj.partition_z(self._occ_npart)
-    #
-    #         return 0
-    #
-    #     else:
-    #
-    #         print("Couldn't load PythonOCC-Core earlier, cannot create OpenCasCade object!")
-    #
-    #         return 1
 
     def points_inside(self, _points):
         """

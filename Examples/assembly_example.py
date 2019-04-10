@@ -27,3 +27,5 @@ if __name__ == '__main__':
         pa.add_electrode(pe)
 
     pa.show()
+
+    pa.get_bempp_mesh()

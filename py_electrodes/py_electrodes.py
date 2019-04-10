@@ -121,7 +121,7 @@ class PyElectrodeAssembly(object):
 
         return _mask
 
-    def get_bempp_mesh(self):
+    def get_bempp_mesh(self, brep_h=0.005):
 
         if not HAVE_BEMPP:
             print("It looks like we can't find BEMPP. Aborting!")
@@ -143,7 +143,7 @@ class PyElectrodeAssembly(object):
                 # Check whether there is a individual mesh for this electrode already
                 # if not: generate it with gmsh
                 if _electrode.gmsh_file is None:
-                    _electrode.generate_mesh()
+                    _electrode.generate_mesh(brep_h=brep_h)
 
                 mesh = bempp.api.import_grid(_electrode.mesh_fn)
 

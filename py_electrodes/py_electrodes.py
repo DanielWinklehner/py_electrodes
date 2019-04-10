@@ -3,6 +3,7 @@ import sys
 import os
 import uuid
 from .py_electrodes_occ import *
+import shutil
 
 # --- Some global variables --- #
 # Display debug messages?
@@ -19,7 +20,7 @@ XYZ = range(3)  # All directions as a list
 # Temporary directory for saving intermittent files
 TEMP_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp")
 if os.path.exists(TEMP_DIR):
-    os.rmdir(TEMP_DIR)
+    shutil.rmtree(TEMP_DIR)
 os.mkdir(TEMP_DIR)
 
 # Gmsh path to executable

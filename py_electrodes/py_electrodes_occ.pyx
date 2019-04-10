@@ -1,13 +1,26 @@
 import numpy as np
 cimport numpy as np
 cimport cython
-import sys
-import os
 
 DTYPE1 = np.float64
 DTYPE2 = np.int
 ctypedef np.float64_t DTYPE1_t
 ctypedef np.int_t DTYPE2_t
+
+# --- Some global variables --- #
+# Display debug messages?
+DEBUG = True
+# How many decimal places to use for rounding
+DECIMALS = 12
+# Define the axis directions and vane rotations:
+X = 0
+Y = 1
+Z = 2
+AXES = {"X": 0, "Y": 1, "Z": 2}
+XYZ = range(3)  # All directions as a list
+
+__author__ = "Daniel Winklehner"
+__doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""
 
 # --- Try importing mpi4py, if it fails, we fall back to single processor
 try:
@@ -18,7 +31,8 @@ try:
     HOST = MPI.Get_processor_name()
     # print("Process {} of {} on host {} started!".format(RANK + 1, SIZE, HOST))
 except ImportError:
-    print("Could not import mpi4py, falling back to single core!")
+    if DEBUG:
+        print("Could not import MPI/mpi4py, falling back to python multiprocessing where appropriate!")
     MPI = None
     COMM = None
     RANK = 0
@@ -47,23 +61,38 @@ try:
     from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
     HAVE_OCC = True
 except ImportError:
-    print("Something went wrong during OCC import. No CAD support possible!")
-    exit()
+    if DEBUG:
+        print("Something went wrong during OCC import. No OpenCasCade support outside gmsh possible!")
+
+# For now, everything involving the pymodules with be done on master proc (RANK 0)
+if RANK == 0:
+
+    from dans_pymodules import *
+
+    COLORS = MyColors()
+
+else:
+
+    COLORS = None
 # ------------------------------------ #
 
 
-class ElectrodeObject(object):
+class PyOCCElectrode(object):
 
     def __init__(self, elec=None, tolerance=1.0e-5, debug=False):
 
         self._debug = debug
         self._bbox_use_mesh = True
-        self._elec = elec
-        self._bbox = None
-        self._socl = None
-        self._tol = tolerance
+        self._elec = elec  # The electrode as OCC object
+        self._bbox = None  # Bounding box
+        self._socl = None  # Solid classifier
         self._bldr = BRep_Builder()
+        # tolerance determines how far the bounding box will be
+        # extending beyond the actual electrode limits
+        self._tol = tolerance
 
+        # The same but as lists in case we split the electrode in
+        # sub-electrodes for faster is-inside tests
         self._elec_s = None
         self._bbox_s = None
         self._socl_s = None
@@ -364,5 +393,4 @@ class ElectrodeObject(object):
 
 if __name__ == "__main__":
 
-    eo = ElectrodeObject()
-    eo.test("vane_yp.brep")
+    pass

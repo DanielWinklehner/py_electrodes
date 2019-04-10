@@ -10,5 +10,5 @@ setup(name='py_electrodes',
       author_email='winklehn@mit.edu',
       license='MIT',
       packages=['py_electrodes'],
-      ext_modules=cythonize("py_electrodes/py_electrodes.pyx"),
+      ext_modules=cythonize("py_electrodes/py_electrodes_occ.pyx"),
       zip_safe=False)

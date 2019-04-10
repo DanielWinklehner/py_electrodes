@@ -171,6 +171,14 @@ class PyElectrode(object):
         if DEBUG:
             print("Generating from stl")
 
+        self._occ_obj = PyOCCElectrode(debug=DEBUG)
+        error = self._occ_obj.load_from_stl(self._orig_file)
+
+        if error:
+            return error
+        else:
+            return 0
+
     def _generate_from_step(self):
         if DEBUG:
             print("Generating from step")

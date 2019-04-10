@@ -20,7 +20,7 @@ XYZ = range(3)  # All directions as a list
 TEMP_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp")
 if os.path.exists(TEMP_DIR):
     os.rmdir(TEMP_DIR)
-    os.mkdir(TEMP_DIR)
+os.mkdir(TEMP_DIR)
 
 # Gmsh path to executable
 GMSH_EXE = "gmsh"
@@ -66,6 +66,9 @@ class PyElectrode(object):
                  voltage=0,
                  geo_str=None):
 
+        print(TEMP_DIR)
+        print(os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp"))
+        global TEMP_DIR
         print(TEMP_DIR)
 
         self._id = uuid.uuid1()

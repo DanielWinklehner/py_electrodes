@@ -1,4 +1,4 @@
-import numpy as np
+# import numpy as np
 cimport numpy as np
 cimport cython
 
@@ -47,12 +47,12 @@ try:
     from OCC.Extend.TopologyUtils import TopologyExplorer
     from OCC.Core.BRepBndLib import brepbndlib_Add as bbox_add
     from OCC.Core.Bnd import Bnd_Box
-    from OCC.Core.gp import gp_Pnt
+    from OCC.Core.gp import gp_Pnt, gp_Vec, gp_Trsf, gp_Quaternion
     from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
     from OCC.Core.TopAbs import TopAbs_ON, TopAbs_OUT, TopAbs_IN
     from OCC.Core.BRep import BRep_Builder
     from OCC.Core.BRepTools import breptools_Read
-    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeSolid
+    from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Transform
     from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Solid
     from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
     from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Common, BRepAlgoAPI_Cut
@@ -91,6 +91,10 @@ class PyOCCElectrode(object):
         # extending beyond the actual electrode limits
         self._tol = tolerance
 
+        self._transformation = gp_Trsf()
+        self._translation = gp_Vec(0.0, 0.0, 0.0)
+        self._rotation = gp_Quaternion(1.0, 0.0, 0.0, 0.0)
+
         # The same but as lists in case we split the electrode in
         # sub-electrodes for faster is-inside tests
         self._elec_s = None
@@ -107,6 +111,15 @@ class PyOCCElectrode(object):
             self._n_s = 1
 
         self._filename = None
+
+    @translation.setter
+    def translation(self, translation):
+        translation = np.asarray(translation)
+
+        if translation.shape == (3, ):
+            self._translation = gp_Vec(translation[0],
+                                       translation[1],
+                                       translation[2])
 
     def get_bounds(self):
         """
@@ -136,10 +149,24 @@ class PyOCCElectrode(object):
         print("Proc {} loading from STL file and generating OCC Object...".format(RANK))
         sys.stdout.flush()
 
-        # Create the OCC solid + bbox and save in vane
+        # Create the OCC solid + bbox
         self._elec = read_stl_file(filename)
+
+        # First apply rotation
+        self._transformation.SetRotation(self._rotation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
+        # Then apply translation
+        self._transformation.SetTranslation(self._translation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
         self._socl = BRepClass3d_SolidClassifier(self._elec)
         self._bbox = self.create_bbox(self._elec, self._tol, self._bbox_use_mesh)
+
+        self._elec_s = [self._elec]
+        self._bbox_s = [self._bbox]
+        self._socl_s = [self._socl]
+        self._n_s = 1
 
         return 0
 
@@ -167,6 +194,14 @@ class PyOCCElectrode(object):
         # TODO: some assertions, right now we put a lot of faith in the user.
         _te = TopologyExplorer(load_shape)
         self._elec = list(_te.solids())[0]  # TODO: What if there are more than 1 solid? -DW
+
+        # First apply rotation
+        self._transformation.SetRotation(self._rotation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
+        # Then apply translation
+        self._transformation.SetTranslation(self._translation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
 
         self._socl = BRepClass3d_SolidClassifier(self._elec)
         self._bbox = self.create_bbox(self._elec, self._tol, self._bbox_use_mesh)

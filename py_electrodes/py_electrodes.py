@@ -4,6 +4,8 @@ import os
 import uuid
 from .py_electrodes_occ import *
 import shutil
+import quaternion
+
 
 # --- Some global variables --- #
 # Display debug messages?
@@ -80,6 +82,38 @@ else:
 
     COLORS = None
 # ------------------------------------ #
+
+
+class CoordinateTransformation3D(object):
+
+    def __init__(self):
+
+        self._translation = np.array([0.0, 0.0, 0.0])
+        self._rotation = np.quaternion(1.0, 0.0, 0.0, 0.0)
+
+    @property
+    def translation(self):
+        return self._translation
+
+    @property
+    def rotation(self):
+        return self._rotation
+    
+    def set_translation(self, translation, absolute=True):
+        """
+        Sets the new translation
+        :param translation: list, tuple or numpy array with three elements dx, dy, dz
+        :param absolute: whether this shift replaces the old shift or is added
+        :return: 
+        """
+
+        translation = np.asarray(translation)
+
+        if translation.shape == (3, ):
+            if absolute:
+                self._translation = translation
+            else:
+                self._translation += translation
 
 
 class PyElectrodeAssembly(object):
@@ -209,12 +243,6 @@ class PyElectrode(object):
         self._color = 'RED'
         self._debug = DEBUG
 
-        # Local to global coordinate transformation
-        self._shift = np.array([0.0, 0.0, 0.0])
-        self._rotate = np.array([[1.0, 0.0, 0.0],
-                                 [0.0, 1.0, 0.0],
-                                 [0.0, 0.0, 1.0]])
-
         self._originated_from = ""
         self._orig_file = None
         self._geo_str = geo_str
@@ -223,6 +251,8 @@ class PyElectrode(object):
         self._gmsh_file = None
         self._occ_obj = None
         self._bempp_domain = None
+
+        self._local_to_global_transformation = CoordinateTransformation3D()
 
         self._initialized = False
 
@@ -263,6 +293,31 @@ class PyElectrode(object):
     @property
     def voltage(self):
         return self._voltage
+
+    @property
+    def local_to_global_transformation(self):
+        return self._local_to_global_transformation
+
+    @local_to_global_transformation.setter
+    def local_to_global_transformation(self, trafo):
+
+        if isinstance(trafo, CoordinateTransformation3D):
+            self._local_to_global_transformation = trafo
+        else:
+            print("Can only set the full transformation as a CoordinateTransformation3D object! "
+                  "Consider using set_shift(), set_rotation()")
+
+    def set_translation(self, translation, absolute=True):
+
+        translation = np.asarray(translation)
+        if not translation.shape == (3, ):
+            print("Shift has to be a 3 x 1 array of dx, dy, dz")
+            return 1
+        
+        self._local_to_global_transformation.set_translation(translation, absolute=absolute)
+
+    def set_rotation(self, rotation, absolute=True):
+        print("Setting rotation not yet implemented!")
 
     @staticmethod
     def _debug_message(*args, rank=0):
@@ -326,7 +381,7 @@ class PyElectrode(object):
 
     def generate_from_file(self, filename=None):
         """
-        Loads the electrode object from file. Extension can be .brep, .geo, .stl, .stp/.step
+        Loads the electrode object from file. Extension can be .brep, .geo, .stl
         :param filename: input file name.
         :return:
         """
@@ -341,8 +396,8 @@ class PyElectrode(object):
         if os.path.isfile(filename):
             name, ext = os.path.splitext(filename)
 
-            assert ext in [".brep", ".geo", ".stl", ".stp", ".step"], \
-                "Extension has to be .brep, .geo, .stl, .stp/.step!"
+            assert ext in [".brep", ".geo", ".stl"], \
+                "Extension has to be .brep, .geo, .stl"
 
             self._orig_file = filename
 
@@ -355,9 +410,9 @@ class PyElectrode(object):
             elif ext.lower() == ".stl":
                 self._originated_from = "stl"
                 self._generate_from_stl()
-            elif ext.lower() in [".stp", ".step"]:
-                self._originated_from = "step"
-                self._generate_from_step()
+            # elif ext.lower() in [".stp", ".step"]:
+            #     self._originated_from = "step"
+            #     self._generate_from_step()
 
             return 0
 
@@ -369,6 +424,7 @@ class PyElectrode(object):
         self._debug_message("Generating from brep")
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
+        self._occ_obj.translation = self._local_to_global_transformation.translation
         error = self._occ_obj.load_from_brep(self._orig_file)
 
         if error:
@@ -400,6 +456,7 @@ class PyElectrode(object):
             return 1
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
+        self._occ_obj.translation = self._local_to_global_transformation.translation
         error = self._occ_obj.load_from_brep(brep_fn)
 
         if error:
@@ -412,6 +469,7 @@ class PyElectrode(object):
         self._debug_message("Generating from stl")
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
+        self._occ_obj.translation = self._local_to_global_transformation.translation
         error = self._occ_obj.load_from_stl(self._orig_file)
 
         if error:
@@ -420,10 +478,10 @@ class PyElectrode(object):
             self._initialized = True
             return 0
 
-    def _generate_from_step(self):
-        self._debug_message("Generating from step")
-
-        print("{}: Generating from step not yet implemented!".format(self._name))
+    # def _generate_from_step(self):
+    #     self._debug_message("Generating from step")
+    #
+    #     print("{}: Generating from step not yet implemented!".format(self._name))
 
     def show(self):
 

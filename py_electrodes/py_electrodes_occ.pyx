@@ -92,8 +92,8 @@ class PyOCCElectrode(object):
         self._tol = tolerance
 
         self._transformation = gp_Trsf()
-        self._translation = gp_Vec(0.0, 0.0, 0.0)
-        self._rotation = gp_Quaternion(1.0, 0.0, 0.0, 0.0)
+        self._translation = gp_Vec(0.0, 0.0, 0.0)  # No translation by default
+        self._rotation = gp_Quaternion(0.0, 0.0, 0.0, 1.0)  # No rotation by default
 
         # The same but as lists in case we split the electrode in
         # sub-electrodes for faster is-inside tests
@@ -158,8 +158,8 @@ class PyOCCElectrode(object):
         self._elec = read_stl_file(filename)
 
         # First apply rotation
-        # self._transformation.SetRotation(self._rotation)
-        # self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+        self._transformation.SetRotation(self._rotation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
 
         # Then apply translation
         self._transformation.SetTranslation(self._translation)
@@ -201,8 +201,8 @@ class PyOCCElectrode(object):
         self._elec = list(_te.solids())[0]  # TODO: What if there are more than 1 solid? -DW
 
         # First apply rotation
-        # self._transformation.SetRotation(self._rotation)
-        # self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+        self._transformation.SetRotation(self._rotation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
 
         # Then apply translation
         self._transformation.SetTranslation(self._translation)

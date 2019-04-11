@@ -283,7 +283,8 @@ class PyOCCElectrode(object):
         :return: boolean numpy array of True or False depending on whether the points are inside or
                  outside (on the surface is counted as inside!)
 
-        Note: If we are running on a single processor, fall back to multiprocessing
+        Note: If we are running on a single processor, fall back to multiprocessing...need to figure out pickle for
+        OCC objects for that... :(
         """
 
         assert self._elec is not None, "No electrode loaded!"

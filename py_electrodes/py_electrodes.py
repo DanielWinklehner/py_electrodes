@@ -203,16 +203,17 @@ class PyElectrode(object):
                  voltage=0,
                  geo_str=None):
 
-        print(TEMP_DIR)
-        print(os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp"))
-        global TEMP_DIR
-        print(TEMP_DIR)
-
         self._id = uuid.uuid1()
         self._name = name
         self._voltage = voltage
         self._color = 'RED'
         self._debug = DEBUG
+
+        # Local to global coordinate transformation
+        self._shift = np.array([0.0, 0.0, 0.0])
+        self._rotate = np.array([[1.0, 0.0, 0.0],
+                                 [0.0, 1.0, 0.0],
+                                 [0.0, 0.0, 1.0]])
 
         self._originated_from = ""
         self._orig_file = None
@@ -222,6 +223,8 @@ class PyElectrode(object):
         self._gmsh_file = None
         self._occ_obj = None
         self._bempp_domain = None
+
+        self._initialized = False
 
         if self._geo_str is not None:
             self._originated_from = "geo_str"
@@ -316,6 +319,9 @@ class PyElectrode(object):
                 _of.write(self._geo_str)
             self._generate_from_geo()
 
+        else:
+            self._debug_message("No geo string found!")
+
         return 0
 
     def generate_from_file(self, filename=None):
@@ -368,6 +374,7 @@ class PyElectrode(object):
         if error:
             return error
         else:
+            self._initialized = True
             return 0
 
     def _generate_from_geo(self):
@@ -398,6 +405,7 @@ class PyElectrode(object):
         if error:
             return error
         else:
+            self._initialized = True
             return 0
 
     def _generate_from_stl(self):
@@ -409,6 +417,7 @@ class PyElectrode(object):
         if error:
             return error
         else:
+            self._initialized = True
             return 0
 
     def _generate_from_step(self):

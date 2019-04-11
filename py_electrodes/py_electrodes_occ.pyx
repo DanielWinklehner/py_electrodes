@@ -112,8 +112,13 @@ class PyOCCElectrode(object):
 
         self._filename = None
 
+    @property
+    def translation(self):
+        return self._translation
+
     @translation.setter
     def translation(self, translation):
+
         translation = np.asarray(translation)
 
         if translation.shape == (3, ):

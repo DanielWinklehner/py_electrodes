@@ -371,8 +371,8 @@ class PyElectrode(object):
         elif self._originated_from in ["geo_str", "geo_file"]:
 
             tx, ty, tz = self._local_to_global_transformation.translation
-            ax, ay, az = quaternion.as_rotation_vector(self._local_to_global_transformation.rotation)
-            angle = Vector(ax, ay, az).length
+            v_rot = quaternion.as_rotation_vector(self._local_to_global_transformation.rotation)
+            angle = Vector(v_rot).length
 
             transform_str = """SetFactory("OpenCASCADE");
 Geometry.NumSubEdges = 100; // nicer display of curve
@@ -382,7 +382,7 @@ v() = Volume "*";
 
 Translate {{ {}, {}, {} }} {{ Volume{{v()}}; }}
 Rotate {{ {{ {} {} {} }}, {{ 0, 0, 0 }}, {} }} {{  v(); }}
-                """.format(self._orig_file, tx, ty, tz, ax, ay, az, angle)
+                """.format(self._orig_file, tx, ty, tz, v_rot[0], v_rot[1], v_rot[2], angle)
 
             transform_fn = os.path.join(TEMP_DIR, "{}_trafo.geo".format(self._id))
             with open(transform_fn, "w") as _of:

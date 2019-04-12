@@ -219,7 +219,8 @@ class PyElectrodeAssembly(object):
             print("OCC couldn't be loaded, no ViewScreen available!")
             return 1
 
-        display, start_display, add_menu, add_function_to_menu = init_display()
+        display, start_display, _, _ = init_display(background_gradient_color1=[135, 206, 250],
+                                                    background_gradient_color2=[255, 255, 255])
 
         for _id, _electrode in self._electrodes.items():
             display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)

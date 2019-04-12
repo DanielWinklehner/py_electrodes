@@ -374,13 +374,23 @@ class PyElectrode(object):
             v_rot = quaternion.as_rotation_vector(self._local_to_global_transformation.rotation)
             angle = Vector(v_rot).length
 
+            omit_t = omit_r = ""
+
+            if np.abs(tx) + np.abs(ty) + np.abs(tz) < 1/DECIMALS:
+                # no translation... omit in geo file
+                omit_t = "//"
+
+            if np.abs(angle) <= 1/DECIMALS:
+                # no rotation... omit in geo file
+                omit_r = "//"
+
             transform_str = """SetFactory("OpenCASCADE");
 Geometry.NumSubEdges = 100; // nicer display of curve
 Merge "{}";
 v() = Volume "*";
-Translate {{ {}, {}, {} }} {{ Volume{{v()}}; }}
-Rotate {{ {{ {}, {}, {} }}, {{ 0, 0, 0 }}, {} }} {{  Volume{{v()}}; }}
-                """.format(self._orig_file, tx, ty, tz, v_rot[0], v_rot[1], v_rot[2], angle)
+{}Translate {{ {}, {}, {} }} {{ Volume{{v()}}; }}
+{}Rotate {{ {{ {}, {}, {} }}, {{ 0, 0, 0 }}, {} }} {{  Volume{{v()}}; }}
+                """.format(self._orig_file, omit_t, tx, ty, tz, omit_r, v_rot[0], v_rot[1], v_rot[2], angle)
 
             transform_fn = os.path.join(TEMP_DIR, "{}_trafo.geo".format(self._id))
             with open(transform_fn, "w") as _of:

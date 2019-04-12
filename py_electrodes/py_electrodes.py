@@ -372,13 +372,13 @@ class PyElectrode(object):
 
             tx, ty, tz = self._local_to_global_transformation.translation
             transform_str = """SetFactory("OpenCASCADE");
-                Geometry.NumSubEdges = 100; // nicer display of curve
-                Merge "{}";
+Geometry.NumSubEdges = 100; // nicer display of curve
+Merge "{}";
 
-                v() = Volume "*";
+v() = Volume "*";
 
-                Translate {{ {}, {}, {} }} {{ v(); }}
-                //Rotate {{ expression-list }} {{  v(); }}
+Translate {{ {}, {}, {} }} {{ Volume{{v()}}; }}
+//Rotate {{ expression-list }} {{  v(); }}
                 """.format(self._orig_file, tx, ty, tz)
 
             transform_fn = os.path.join(TEMP_DIR, "{}_trafo.geo".format(self._id))

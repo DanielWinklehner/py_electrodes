@@ -220,7 +220,7 @@ class PyElectrodeAssembly(object):
             return 1
 
         display, start_display, _, _ = init_display()
-        display.set_bg_gradient_color(135, 206, 250, 255, 255, 255)
+        display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
 
         for _id, _electrode in self._electrodes.items():
             display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)

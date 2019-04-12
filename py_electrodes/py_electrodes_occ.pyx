@@ -404,7 +404,8 @@ class PyOCCElectrode(object):
 
     def show(self):
 
-        display, start_display, add_menu, add_function_to_menu = init_display()
+        display, start_display, _, _ = init_display()
+        display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
 
         display.DisplayShape(self._elec, color="RED", update=True)
 

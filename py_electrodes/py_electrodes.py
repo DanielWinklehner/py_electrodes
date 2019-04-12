@@ -223,7 +223,8 @@ class PyElectrodeAssembly(object):
         display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
 
         for _id, _electrode in self._electrodes.items():
-            display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)
+            if _electrode is not None:
+                display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)
 
         display.FitAll()
         display.Repaint()

@@ -352,6 +352,8 @@ class PyElectrode(object):
             print("No geometry loaded yet!")
             return 1
 
+        print("\n\nIn generate_mesh: Originated from = {}\n\n".format(self._originated_from))
+
         msh_fn = os.path.join(TEMP_DIR, "{}.msh".format(self._id))
 
         # For now, we need to save in msh2 format for BEMPP compability
@@ -363,6 +365,7 @@ class PyElectrode(object):
         # TODO: What about the reverse mesh thing?
         # TODO: This is assuming the user has defined a volume in geo string or geo file...
         if self._originated_from == "brep":
+
             command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2".format(GMSH_EXE, self._orig_file,
                                                                              brep_h, msh_fn)
         elif self._originated_from in ["geo_str", "geo_file"]:
@@ -382,7 +385,7 @@ class PyElectrode(object):
             with open(transform_fn, "w") as _of:
                 _of.write(transform_str)
 
-            command = "{} \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE, transform_fn , msh_fn)
+            command = "{} \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE, transform_fn, msh_fn)
 
         elif self._originated_from == "stl":
             print("Meshing with transformations from stl not yet implemented")

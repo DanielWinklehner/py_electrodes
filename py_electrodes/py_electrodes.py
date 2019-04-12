@@ -357,12 +357,36 @@ class PyElectrode(object):
         # For now, we need to save in msh2 format for BEMPP compability
         # gmsh can handle geo, brep and stl the same way. However, brep has no mesh resolution
         # information. STL is already a mesh...
+
+        # Create a string that contains the transformations
+        # TODO: may have to add the mesh size in again.
+        # TODO: What about the reverse mesh thing?
+        # TODO: This is assuming the user has defined a volume in geo string or geo file...
         if self._originated_from == "brep":
             command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2".format(GMSH_EXE, self._orig_file,
                                                                              brep_h, msh_fn)
-        elif self._originated_from in ["geo_str", "geo_file", "stl"]:
-            command = "{} \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE, self._orig_file, msh_fn)
+        elif self._originated_from in ["geo_str", "geo_file"]:
 
+            tx, ty, tz = self._local_to_global_transformation.translation
+            transform_str = """SetFactory("OpenCASCADE");
+                Geometry.NumSubEdges = 100; // nicer display of curve
+                Merge "{}";
+
+                v() = Volume "*";
+
+                Translate {{ {}, {}, {} }} {{ v(); }}
+                //Rotate {{ expression-list }} {{  v(); }}
+                """.format(self._orig_file, tx, ty, tz)
+
+            transform_fn = os.path.join(TEMP_DIR, "{}_trafo.geo".format(self._id))
+            with open(transform_fn, "w") as _of:
+                _of.write(transform_str)
+
+            command = "{} \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE, transform_fn , msh_fn)
+
+        elif self._originated_from == "stl":
+            print("Meshing with transformations from stl not yet implemented")
+            return 1
         else:
             print("Format not supported for meshing!")
             return 1

@@ -1,7 +1,6 @@
 import numpy as np
 import quaternion
 cimport numpy as np
-cimport quaternion
 cimport cython
 
 DTYPE1 = np.float64

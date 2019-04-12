@@ -1,5 +1,7 @@
 import numpy as np
+import quaternion
 cimport numpy as np
+cimport quaternion
 cimport cython
 
 DTYPE1 = np.float64
@@ -125,6 +127,28 @@ class PyOCCElectrode(object):
             self._translation = gp_Vec(translation[0],
                                        translation[1],
                                        translation[2])
+
+    @property
+    def rotation(self):
+        """
+        Cave: python quaternion has w as first entry, OCC quaternion as last!
+        :return: rotation as a quaternion object.
+        """
+        rot = np.quaternion(self.rotation[3],
+                            self.rotation[0],
+                            self.rotation[1],
+                            self.rotation[2])
+
+        return rot
+
+    @rotation.setter
+    def rotation(self, rotation):
+        """
+        Cave: python quaternion has w as first entry, OCC quaternion as last!
+        """
+        assert isinstance(rotation, np.quaternion), "rotation has to be a python/numpy quaternion object!"
+
+        self._rotation = gp_Quaternion(rotation.x, rotation.y, rotation.z, rotation.w)
 
     def get_bounds(self):
         """

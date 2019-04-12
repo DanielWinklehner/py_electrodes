@@ -115,6 +115,23 @@ class CoordinateTransformation3D(object):
             else:
                 self._translation += translation
 
+    def set_rotation_from_angle_axis(self, angle, axis, absolute=True):
+        """
+        Quaternion object can be generated from rotation axis where length of vector = rotation angle
+        :param angle: rotation angle in rad
+        :param axis: rotation axis, can be unnormalized
+        :param absolute: Replace existing rotation or append (multiply with existing)
+        :return:
+        """
+        axis /= np.linalg.norm(axis)
+        axis *= angle
+        quat = quaternion.from_rotation_vector(axis)
+
+        if absolute:
+            self._rotation = quat
+        else:
+            self._rotation = quat * self._rotation
+
 
 class PyElectrodeAssembly(object):
 
@@ -318,8 +335,9 @@ class PyElectrode(object):
         
         self._local_to_global_transformation.set_translation(translation, absolute=absolute)
 
-    def set_rotation(self, rotation, absolute=True):
-        print("Setting rotation not yet implemented!")
+    def set_rotation_angle_axis(self, angle, axis, absolute=True):
+
+        self._local_to_global_transformation.set_rotation_from_angle_axis(angle, axis, absolute=absolute)
 
     @staticmethod
     def _debug_message(*args, rank=0):
@@ -427,6 +445,7 @@ class PyElectrode(object):
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
         self._occ_obj.translation = self._local_to_global_transformation.translation
+        self._occ_obj.rotation = self._local_to_global_transformation.rotation
         error = self._occ_obj.load_from_brep(self._orig_file)
 
         if error:
@@ -459,6 +478,7 @@ class PyElectrode(object):
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
         self._occ_obj.translation = self._local_to_global_transformation.translation
+        self._occ_obj.rotation = self._local_to_global_transformation.rotation
         error = self._occ_obj.load_from_brep(brep_fn)
 
         if error:
@@ -472,6 +492,7 @@ class PyElectrode(object):
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
         self._occ_obj.translation = self._local_to_global_transformation.translation
+        self._occ_obj.rotation = self._local_to_global_transformation.rotation
         error = self._occ_obj.load_from_stl(self._orig_file)
 
         if error:

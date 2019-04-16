@@ -235,7 +235,7 @@ class PyElectrodeAssembly(object):
 
         return self._full_mesh
 
-    def show(self, display=None):
+    def show(self, display=None, show_screen=False):
 
         if not HAVE_OCC:
             print("OCC couldn't be loaded, no ViewScreen available!")
@@ -251,9 +251,11 @@ class PyElectrodeAssembly(object):
 
         display.FitAll()
         display.Repaint()
-        start_display()
 
-        return display
+        if show_screen:
+            start_display()
+
+        return display, start_display
 
 
 class PyElectrode(object):

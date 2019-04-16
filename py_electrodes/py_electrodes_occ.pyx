@@ -221,7 +221,24 @@ class PyOCCElectrode(object):
         # The loaded shape is a compound of solid, shell, surfs, lines and points. We select the solid only.
         # TODO: some assertions, right now we put a lot of faith in the user.
         _te = TopologyExplorer(load_shape)
-        self._elec = list(_te.solids())[0]  # TODO: What if there are more than 1 solid? -DW
+
+        # Here we make our way down from solids to surfaces to edges
+        if len(list(_te.solids())) > 0:
+            self._elec = list(_te.solids())[0]  # TODO: What if there are more than 1 solid? -DW
+        elif len(list(_te.faces())) > 0:
+            self._elec = list(_te.faces())[0]
+        elif len(list(_te.edges())) > 0:
+            self._elec = list(_te.edges())[0]
+        else:
+            print("Couldn't load from brep file")
+            print("Number of faces: {}".format(_te.number_of_faces()))
+            print("Number of vertices: {}".format(_te.number_of_vertices()))
+            print("Number of wires: {}".format(_te.number_of_wires()))
+            print("Number of edges: {}".format(_te.number_of_edges()))
+            print("Number of shells: {}".format(_te.number_of_shells()))
+            print("Number of solids: {}".format(_te.number_of_solids()))
+            print("Number of compounds: {}".format(_te.number_of_compounds()))
+            print("Number of compound solids: {}".format(_te.number_of_comp_solids()))
 
         # First apply rotation
         self._transformation.SetRotation(self._rotation)

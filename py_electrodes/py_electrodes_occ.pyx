@@ -425,16 +425,22 @@ class PyOCCElectrode(object):
 
         return np.array(mask, dtype=np.bool)
 
-    def show(self):
+    def show(self, display=None, color="RED"):
 
-        display, start_display, _, _ = init_display()
-        display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
+        if display is None:
 
-        display.DisplayShape(self._elec, color="RED", update=True)
+            display, start_display, _, _ = init_display()
+            display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
 
-        start_display()
+            display.DisplayShape(self._elec, color=color, update=True)
 
-        return 0
+            start_display()
+
+        else:
+
+            display.DisplayShape(self._elec, color=color, update=False)
+
+        return display
 
 
 if __name__ == "__main__":

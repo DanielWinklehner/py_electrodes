@@ -235,7 +235,7 @@ class PyElectrodeAssembly(object):
 
         return self._full_mesh
 
-    def show(self):
+    def show(self, display=None):
 
         if not HAVE_OCC:
             print("OCC couldn't be loaded, no ViewScreen available!")
@@ -246,13 +246,14 @@ class PyElectrodeAssembly(object):
 
         for _id, _electrode in self._electrodes.items():
             if _electrode is not None:
-                display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)
+                _electrode.show(display=display, color=_electrode.color)
+                # display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)
 
         display.FitAll()
         display.Repaint()
         start_display()
 
-        return 0
+        return display
 
 
 class PyElectrode(object):
@@ -290,7 +291,7 @@ class PyElectrode(object):
 
     @color.setter
     def color(self, color):
-        assert color in ['RED', 'BLUE', 'GREEN'], "For now, colors are restricted to RED, BLUE, GREEN."
+        assert color in ['RED', 'BLUE', 'GREEN', 'BLACK'], "For now, colors are restricted to RED, BLUE, GREEN, BLACK."
         self._color = color
 
     @property
@@ -553,12 +554,13 @@ class PyElectrode(object):
     #
     #     print("{}: Generating from step not yet implemented!".format(self._name))
 
-    def show(self):
+    def show(self, display=None):
 
         if self._occ_obj is not None:
-            self._occ_obj.show()
 
-        return 0
+            display = self._occ_obj.show(display, color=self._color)
+
+        return display
 
 #     def generate_gmsh_files(self):
 #
@@ -646,5 +648,4 @@ class PyElectrode(object):
 
 
 if __name__ == "__main__":
-
     pass

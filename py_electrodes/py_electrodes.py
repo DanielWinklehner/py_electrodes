@@ -178,8 +178,6 @@ class PyElectrodeAssembly(object):
 
     def get_bempp_mesh(self, brep_h=0.005):
 
-        print("\nDebug is {}\n".format(DEBUG))
-
         if not HAVE_BEMPP:
             print("It looks like we can't find BEMPP. Aborting!")
             return 1
@@ -224,6 +222,7 @@ class PyElectrodeAssembly(object):
                                "domns": domains}
 
             if DEBUG:
+                print("Plotting even though I shouldn't\n")
                 bempp.api.grid.grid_from_element_data(vertices,
                                                       elements,
                                                       domains).plot()
@@ -358,8 +357,6 @@ class PyElectrode(object):
             print("No geometry loaded yet!")
             return 1
 
-        print("\n\nIn generate_mesh: Originated from = {}\n\n".format(self._originated_from))
-
         msh_fn = os.path.join(TEMP_DIR, "{}.msh".format(self._id))
         sto_fn = os.path.join(TEMP_DIR, "{}_gmsh.out".format(self._id))
         err_fn = os.path.join(TEMP_DIR, "{}_gmsh.err".format(self._id))
@@ -419,10 +416,8 @@ class PyElectrode(object):
             print("Format not supported for meshing!")
             return 1
 
-        if self._debug:
-            print("Running", command)
-            sys.stdout.flush()
-
+        print("Running", command)
+        sys.stdout.flush()
         gmsh_success = os.system(command)
 
         if gmsh_success != 0:

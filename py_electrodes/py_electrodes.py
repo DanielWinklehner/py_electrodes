@@ -387,7 +387,7 @@ class PyElectrode(object):
             transform_str = """v() = Volume "*";
 {}Translate {{ {}, {}, {} }} {{ Volume{{v()}}; }}
 {}Rotate {{ {{ {}, {}, {} }}, {{ 0, 0, 0 }}, {} }} {{  Volume{{v()}}; }}
-""".format(self._orig_file, omit_t, tx, ty, tz, omit_r, v_rot[0], v_rot[1], v_rot[2], angle)
+""".format(omit_t, tx, ty, tz, omit_r, v_rot[0], v_rot[1], v_rot[2], angle)
 
             transform_fn = os.path.join(TEMP_DIR, "{}_trafo.geo".format(self._id))
             with open(transform_fn, "w") as _of:

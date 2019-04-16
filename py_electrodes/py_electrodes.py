@@ -361,6 +361,8 @@ class PyElectrode(object):
         print("\n\nIn generate_mesh: Originated from = {}\n\n".format(self._originated_from))
 
         msh_fn = os.path.join(TEMP_DIR, "{}.msh".format(self._id))
+        sto_fn = os.path.join(TEMP_DIR, "{}_gmsh.out".format(self._id))
+        err_fn = os.path.join(TEMP_DIR, "{}_gmsh.err".format(self._id))
 
         # For now, we need to save in msh2 format for BEMPP compability
         # gmsh can handle geo, brep and stl the same way. However, brep has no mesh resolution
@@ -372,8 +374,12 @@ class PyElectrode(object):
         # TODO: This is assuming the user has defined a volume in geo string or geo file...
         if self._originated_from == "brep":
 
-            command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2".format(GMSH_EXE, self._orig_file,
-                                                                             brep_h, msh_fn)
+            command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2 1>{} 2>{}".format(GMSH_EXE,
+                                                                                       self._orig_file,
+                                                                                       brep_h,
+                                                                                       msh_fn,
+                                                                                       sto_fn,
+                                                                                       err_fn)
         elif self._originated_from in ["geo_str", "geo_file"]:
 
             tx, ty, tz = self._local_to_global_transformation.translation

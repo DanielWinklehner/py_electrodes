@@ -405,10 +405,12 @@ class PyElectrode(object):
             with open(transform_fn, "w") as _of:
                 _of.write(transform_str)
 
-            command = "{} \"{}\" \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE,
-                                                                          self._orig_file,
-                                                                          transform_fn,
-                                                                          msh_fn)
+            command = "{} \"{}\" \"{}\" -2 -o \"{}\" -format msh2 1>{} 2>{}".format(GMSH_EXE,
+                                                                                    self._orig_file,
+                                                                                    transform_fn,
+                                                                                    msh_fn,
+                                                                                    sto_fn,
+                                                                                    err_fn)
 
         elif self._originated_from == "stl":
             print("Meshing with transformations from stl not yet implemented")

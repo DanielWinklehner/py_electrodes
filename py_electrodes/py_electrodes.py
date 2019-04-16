@@ -384,10 +384,7 @@ class PyElectrode(object):
                 # no rotation... omit in geo file
                 omit_r = "//"
 
-            transform_str = """SetFactory("OpenCASCADE");
-//Geometry.NumSubEdges = 100; // nicer display of curve
-Merge "{}";
-v() = Volume "*";
+            transform_str = """v() = Volume "*";
 {}Translate {{ {}, {}, {} }} {{ Volume{{v()}}; }}
 {}Rotate {{ {{ {}, {}, {} }}, {{ 0, 0, 0 }}, {} }} {{  Volume{{v()}}; }}
 """.format(self._orig_file, omit_t, tx, ty, tz, omit_r, v_rot[0], v_rot[1], v_rot[2], angle)
@@ -396,7 +393,10 @@ v() = Volume "*";
             with open(transform_fn, "w") as _of:
                 _of.write(transform_str)
 
-            command = "{} \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE, transform_fn, msh_fn)
+            command = "{} \"{}\" \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE,
+                                                                          self._orig_file,
+                                                                          transform_fn,
+                                                                          msh_fn)
 
         elif self._originated_from == "stl":
             print("Meshing with transformations from stl not yet implemented")

@@ -178,6 +178,8 @@ class PyElectrodeAssembly(object):
 
     def get_bempp_mesh(self, brep_h=0.005):
 
+        print("\nDebug is {}\n".format(DEBUG))
+
         if not HAVE_BEMPP:
             print("It looks like we can't find BEMPP. Aborting!")
             return 1

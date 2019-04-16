@@ -9,7 +9,7 @@ import quaternion
 
 # --- Some global variables --- #
 # Display debug messages?
-DEBUG = True
+DEBUG = False
 # How many decimal places to use for rounding
 DECIMALS = 12
 # Define the axis directions and vane rotations:

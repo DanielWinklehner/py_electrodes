@@ -142,6 +142,10 @@ class PyElectrodeAssembly(object):
         self._electrodes = {}
         self._full_mesh = None  # BEMPP full mesh
 
+    @property
+    def electrodes(self):
+        return self._electrodes
+
     @staticmethod
     def _debug_message(*args, rank=0):
         if RANK == rank and DEBUG:

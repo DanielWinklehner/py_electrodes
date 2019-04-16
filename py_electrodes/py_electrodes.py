@@ -246,7 +246,7 @@ class PyElectrodeAssembly(object):
 
         for _id, _electrode in self._electrodes.items():
             if _electrode is not None:
-                _electrode.show(display=display, color=_electrode.color)
+                _electrode.show(display=display)
                 # display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)
 
         display.FitAll()

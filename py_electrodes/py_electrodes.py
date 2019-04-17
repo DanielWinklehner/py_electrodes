@@ -277,12 +277,14 @@ class PyElectrodeAssembly(object):
             display, start_display, _, _ = init_display()
             display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
 
+        from OCC.Core.AIS import Handle_AIS_Shape_DownCast
+
         for _id, _electrode in self._electrodes.items():
             if _electrode is not None:
                 display, ais_shape = _electrode.show(display=display)
 
-                print(ais_shape)
-                print(_electrode._occ_obj)
+                print(Handle_AIS_Shape_DownCast(ais_shape))
+                print(_electrode._occ_obj._elec)
 
         if show_screen:
             display.FitAll()

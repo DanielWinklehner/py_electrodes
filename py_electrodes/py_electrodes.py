@@ -281,7 +281,7 @@ class PyElectrodeAssembly(object):
             if _electrode is not None:
                 display, ais_shape = _electrode.show(display=display)
 
-                print(ais_shape.Shape())
+                print(ais_shape)
                 print(_electrode.occ_obj)
 
         if show_screen:

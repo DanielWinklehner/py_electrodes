@@ -283,9 +283,9 @@ class PyElectrodeAssembly(object):
             if _electrode is not None:
                 display, ais_shape = _electrode.show(display=display)
 
-                print(Handle_AIS_Shape_DownCast(ais_shape).Shape())
+                print(Handle_AIS_Shape_DownCast(ais_shape))
                 print(_electrode._occ_obj._elec)
-                print(Handle_AIS_Shape_DownCast(ais_shape).Shape() == _electrode._occ_obj._elec)
+                print(Handle_AIS_Shape_DownCast(ais_shape) == _electrode._occ_obj._elec)
 
         if show_screen:
             display.FitAll()

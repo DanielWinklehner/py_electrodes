@@ -286,7 +286,7 @@ class PyElectrodeAssembly(object):
                 print(ais_shape)
                 print(Handle_AIS_Shape_DownCast(ais_shape).GetObject())
                 print(_electrode._occ_obj._elec)
-                print(Handle_AIS_Shape_DownCast(ais_shape).GetObject().Shape() == _electrode._occ_obj._elec)
+                print(ais_shape.GetObject().Shape() == _electrode._occ_obj._elec)
 
         if show_screen:
             display.FitAll()

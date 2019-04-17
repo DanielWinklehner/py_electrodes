@@ -134,7 +134,11 @@ class CoordinateTransformation3D(object):
 
 
 class PyElectrodeAssembly(object):
-
+    """
+    The Assembly's transformation will only be applied when it is displayed (show),
+    exported to file, or a full mesh is calculated from it.
+    It will not be applied to the individual electrodes!
+    """
     def __init__(self,
                  name="New Assembly"):
 
@@ -142,9 +146,37 @@ class PyElectrodeAssembly(object):
         self._electrodes = {}
         self._full_mesh = None  # BEMPP full mesh
 
+        self._local_to_global_transformation = CoordinateTransformation3D()
+
     @property
     def electrodes(self):
         return self._electrodes
+
+    @property
+    def local_to_global_transformation(self):
+        return self._local_to_global_transformation
+
+    @local_to_global_transformation.setter
+    def local_to_global_transformation(self, trafo):
+
+        if isinstance(trafo, CoordinateTransformation3D):
+            self._local_to_global_transformation = trafo
+        else:
+            print("Can only set the full transformation as a CoordinateTransformation3D object! "
+                  "Consider using set_translation(), set_rotation_angle_axis()")
+
+    def set_translation(self, translation, absolute=True):
+
+        translation = np.asarray(translation)
+        if not translation.shape == (3,):
+            print("Shift has to be a 3 x 1 array of dx, dy, dz")
+            return 1
+
+        self._local_to_global_transformation.set_translation(translation, absolute=absolute)
+
+    def set_rotation_angle_axis(self, angle, axis, absolute=True):
+        print("Sorry, rotation of an assembly is not yet implemented!")
+        # self._local_to_global_transformation.set_rotation_from_angle_axis(angle, axis, absolute=absolute)
 
     @staticmethod
     def _debug_message(*args, rank=0):
@@ -222,7 +254,6 @@ class PyElectrodeAssembly(object):
                                "domns": domains}
 
             if DEBUG:
-                print("Plotting even though I shouldn't\n")
                 bempp.api.grid.grid_from_element_data(vertices,
                                                       elements,
                                                       domains).plot()
@@ -241,18 +272,21 @@ class PyElectrodeAssembly(object):
             print("OCC couldn't be loaded, no ViewScreen available!")
             return 1
 
-        display, start_display, _, _ = init_display()
-        display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
+        if display is None:
+
+            display, start_display, _, _ = init_display()
+            display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
 
         for _id, _electrode in self._electrodes.items():
             if _electrode is not None:
-                _electrode.show(display=display)
-                # display.DisplayShape(_electrode._occ_obj._elec, color=_electrode.color, update=False)
+                display, ais_shape = _electrode.show(display=display)
 
-        display.FitAll()
-        display.Repaint()
+                print(ais_shape.Shape())
+                print(_electrode.occ_obj)
 
         if show_screen:
+            display.FitAll()
+            display.Repaint()
             start_display()
 
         return display, start_display
@@ -332,7 +366,7 @@ class PyElectrode(object):
             self._local_to_global_transformation = trafo
         else:
             print("Can only set the full transformation as a CoordinateTransformation3D object! "
-                  "Consider using set_shift(), set_rotation()")
+                  "Consider using set_translation(), set_rotation_angle_axis()")
 
     def set_translation(self, translation, absolute=True):
 
@@ -560,9 +594,9 @@ class PyElectrode(object):
 
         if self._occ_obj is not None:
 
-            display = self._occ_obj.show(display, color=self._color)
+            display, ais_shape = self._occ_obj.show(display, color=self._color)
 
-        return display
+        return display, ais_shape
 
 #     def generate_gmsh_files(self):
 #

@@ -449,15 +449,15 @@ class PyOCCElectrode(object):
             display, start_display, _, _ = init_display()
             display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
 
-            display.DisplayShape(self._elec, color=color, update=True)
+            ais_shape = display.DisplayShape(self._elec, color=color, update=True)
 
             start_display()
 
         else:
 
-            display.DisplayShape(self._elec, color=color, update=False)
+            ais_shape = display.DisplayShape(self._elec, color=color, update=False)
 
-        return display
+        return display, ais_shape
 
 
 if __name__ == "__main__":

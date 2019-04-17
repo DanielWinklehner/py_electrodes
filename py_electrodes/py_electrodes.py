@@ -282,7 +282,7 @@ class PyElectrodeAssembly(object):
                 display, ais_shape = _electrode.show(display=display)
 
                 print(ais_shape)
-                print(_electrode.occ_obj)
+                print(_electrode._occ_obj)
 
         if show_screen:
             display.FitAll()

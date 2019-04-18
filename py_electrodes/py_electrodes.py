@@ -275,7 +275,7 @@ class PyElectrodeAssembly(object):
         if display is None:
 
             display, start_display, _, _ = init_display()
-            display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
+            display.set_bg_gradient_color([175, 210, 255], [255, 255, 255])
 
         for _id, _electrode in self._electrodes.items():
             if _electrode is not None:

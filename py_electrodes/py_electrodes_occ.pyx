@@ -447,8 +447,8 @@ class PyOCCElectrode(object):
         if display is None:
 
             display, start_display, _, _ = init_display()
-            display.set_bg_gradient_color(175, 210, 255, 255, 255, 255)
 
+            display.set_bg_gradient_color([175, 210, 255], [255, 255, 255])
             ais_shape = display.DisplayShape(self._elec, color=color, update=True)
 
             start_display()

@@ -43,6 +43,7 @@ except ImportError:
         print("Something went wrong during OCC import. No OpenCasCade support outside gmsh possible!")
 
 # --- Try importing BEMPP
+# TODO: Remove BEMPP dependency!
 HAVE_BEMPP = False
 try:
     import bempp.api
@@ -166,13 +167,13 @@ class PyElectrodeAssembly(object):
                   "Consider using set_translation(), set_rotation_angle_axis()")
 
     def set_translation(self, translation, absolute=True):
-
-        translation = np.asarray(translation)
-        if not translation.shape == (3,):
-            print("Shift has to be a 3 x 1 array of dx, dy, dz")
-            return 1
-
-        self._local_to_global_transformation.set_translation(translation, absolute=absolute)
+        print("Sorry, translation of an assembly is not yet implemented!")
+        # translation = np.asarray(translation)
+        # if not translation.shape == (3,):
+        #     print("Shift has to be a 3 x 1 array of dx, dy, dz")
+        #     return 1
+        #
+        # self._local_to_global_transformation.set_translation(translation, absolute=absolute)
 
     def set_rotation_angle_axis(self, angle, axis, absolute=True):
         print("Sorry, rotation of an assembly is not yet implemented!")

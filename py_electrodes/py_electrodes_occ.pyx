@@ -65,18 +65,6 @@ except ImportError:
     if DEBUG:
         print("Something went wrong during OCC import. No OpenCasCade support outside gmsh possible!")
 
-# For now, everything involving the pymodules with be done on master proc (RANK 0)
-if RANK == 0:
-
-    from dans_pymodules import *
-
-    COLORS = MyColors()
-
-else:
-
-    COLORS = None
-# ------------------------------------ #
-
 
 class PyOCCElectrode(object):
 

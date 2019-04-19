@@ -5,32 +5,29 @@ import uuid
 from .py_electrodes_occ import *
 import shutil
 import quaternion
+from .settings import SettingsHandler
 
+__author__ = "Daniel Winklehner"
+__doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""
 
-# --- Some global variables --- #
-# Display debug messages?
-DEBUG = False
-# How many decimal places to use for rounding
-DECIMALS = 12
+# --- Set global variables from Settings.txt file--- #
+settings = SettingsHandler()
+DEBUG = settings["DEBUG"]
+DECIMALS = settings["DECIMALS"]
+GMSH_EXE = settings["GMSH_EXE"]
+TEMP_DIR = settings["TEMP_DIR"]
+
+# Temporary directory for saving intermittent files
+if os.path.exists(TEMP_DIR):
+    shutil.rmtree(TEMP_DIR)
+os.mkdir(TEMP_DIR)
+
 # Define the axis directions and vane rotations:
 X = 0
 Y = 1
 Z = 2
 AXES = {"X": 0, "Y": 1, "Z": 2}
 XYZ = range(3)  # All directions as a list
-
-# Temporary directory for saving intermittent files
-TEMP_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), "temp")
-if os.path.exists(TEMP_DIR):
-    shutil.rmtree(TEMP_DIR)
-os.mkdir(TEMP_DIR)
-
-# Gmsh path to executable
-GMSH_EXE = "gmsh"
-# GMSH_EXE = "E:/gmsh4/gmsh.exe"
-
-__author__ = "Daniel Winklehner"
-__doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""
 
 # --- Test if we have OCC and Viewer
 HAVE_OCC = False

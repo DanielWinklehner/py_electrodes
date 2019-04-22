@@ -1,2 +1,2 @@
 include Settings.txt
-include Doc/spec-file-win.txt
+recursive-include Doc *

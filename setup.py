@@ -1,7 +1,7 @@
 from distutils.core import setup
 from Cython.Build import cythonize
 import numpy
-from .py_electrodes.settings import SettingsHandler
+from py_electrodes.settings import SettingsHandler
 from setuptools.command.develop import develop
 from setuptools.command.install import install
 

@@ -1,1 +1,2 @@
 include Settings.txt
+recursive-include Examples

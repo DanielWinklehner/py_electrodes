@@ -412,7 +412,7 @@ class PyElectrode(object):
 
             tx, ty, tz = self._local_to_global_transformation.translation
             v_rot = quaternion.as_rotation_vector(self._local_to_global_transformation.rotation)
-            angle = Vector(v_rot).length
+            angle = np.sqrt(np.sum(np.dot(v_rot, v_rot)))
 
             omit_t = omit_r = ""
 

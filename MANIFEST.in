@@ -1,2 +1,3 @@
 include Settings.txt
-recursive-include Examples *
+include spec-file-win.txt
+

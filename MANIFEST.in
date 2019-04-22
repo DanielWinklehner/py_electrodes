@@ -1,3 +1,2 @@
 include Settings.txt
-include spec-file-win.txt
-README.md
+include Doc/spec-file-win.txt

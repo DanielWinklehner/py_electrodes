@@ -150,6 +150,36 @@ class PyOCCElectrode(object):
     def get_bbox(self):
         return self._bbox
 
+    def apply_second_transformation(self, translation=None, rotation=None):
+        """
+        ONLY USE THIS IF YOU KNOW WHAT YOU ARE DOING!
+        :param translation:
+        :param rotation:
+        :return:
+        """
+        update = False
+
+        # First apply rotation
+        if rotation is None:
+            self._transformation.SetRotation(rotation)
+            self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+            update = True
+
+        # Then apply translation
+        if translation is not None:
+            self._transformation.SetTranslation(translation)
+            self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+            update = True
+
+        if update:
+            self._socl = BRepClass3d_SolidClassifier(self._elec)
+            self._bbox = self.create_bbox(self._elec, self._tol, self._bbox_use_mesh)
+
+            self._elec_s = [self._elec]
+            self._bbox_s = [self._bbox]
+            self._socl_s = [self._socl]
+            self._n_s = 1
+
     def load_from_stl(self, filename=None):
         """
         STL is a mesh format. Segmentation will not work (yet) if the object is loaded as STL!

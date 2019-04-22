@@ -7,6 +7,7 @@ import shutil
 import quaternion
 from .settings import SettingsHandler
 from .tk_filedialog import FileDialog
+import copy
 
 __author__ = "Daniel Winklehner"
 __doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""
@@ -17,6 +18,8 @@ DEBUG = (settings["DEBUG"] == "True")
 DECIMALS = float(settings["DECIMALS"])
 GMSH_EXE = settings["GMSH_EXE"]
 TEMP_DIR = settings["TEMP_DIR"]
+OCC_GRADIENT1 = [int(item) for item in settings["OCC_GRADIENT1"].split("]")[0].split("[")[1].split(",")]
+OCC_GRADIENT2 = [int(item) for item in settings["OCC_GRADIENT1"].split("]")[0].split("[")[1].split(",")]
 
 # Temporary directory for saving intermittent files
 if os.path.exists(TEMP_DIR):
@@ -34,14 +37,16 @@ XYZ = range(3)  # All directions as a list
 HAVE_OCC = False
 try:
     from OCC.Display.SimpleGui import init_display
+    from OCC.Core.gp import gp_Vec, gp_Quaternion
     HAVE_OCC = True
 except ImportError:
     init_display = None
+    gp_Vec = gp_Quaternion = None
     if DEBUG:
         print("Something went wrong during OCC import. No OpenCasCade support outside gmsh possible!")
 
 # --- Try importing BEMPP
-# TODO: Remove BEMPP dependency!
+# TODO: Remove BEMPP dependency?
 HAVE_BEMPP = False
 try:
     import bempp.api
@@ -77,6 +82,37 @@ class CoordinateTransformation3D(object):
 
         self._translation = np.array([0.0, 0.0, 0.0])
         self._rotation = np.quaternion(1.0, 0.0, 0.0, 0.0)
+
+    def apply_to_points(self, points):
+
+        points = np.asarray(points)
+        assert points.ndim == 2 and points[0].shape == (3, ), "points array needs to be of shape (N, 3)"
+
+        # Rotation first
+        points = quaternion.rotate_vectors(self._rotation, points)
+
+        # Then translation
+        points[:, 0] += self._translation[0]
+        points[:, 1] += self._translation[1]
+        points[:, 2] += self._translation[2]
+
+        return points
+
+    def apply_inverse_to_points(self, points):
+
+        points = np.asarray(points)
+        assert points.ndim == 2 and points[0].shape == (3, ), "points array needs to be of shape (N, 3)"
+
+        # Translation first
+        points[:, 0] -= self._translation[0]
+        points[:, 1] -= self._translation[1]
+        points[:, 2] -= self._translation[2]
+
+        # Then rotation
+        inv_rot = self._rotation.inverse()
+        points = quaternion.rotate_vectors(inv_rot, points)
+
+        return points
 
     @property
     def translation(self):
@@ -132,8 +168,7 @@ class PyElectrodeAssembly(object):
         self._name = name
         self._electrodes = {}
         self._full_mesh = None  # BEMPP full mesh
-
-        self._local_to_global_transformation = CoordinateTransformation3D()
+        self._transformation = CoordinateTransformation3D()
 
     @property
     def electrodes(self):
@@ -141,30 +176,38 @@ class PyElectrodeAssembly(object):
 
     @property
     def local_to_global_transformation(self):
-        return self._local_to_global_transformation
+        return self._transformation
 
     @local_to_global_transformation.setter
     def local_to_global_transformation(self, trafo):
 
         if isinstance(trafo, CoordinateTransformation3D):
-            self._local_to_global_transformation = trafo
+            self._transformation = trafo
         else:
             print("Can only set the full transformation as a CoordinateTransformation3D object! "
                   "Consider using set_translation(), set_rotation_angle_axis()")
 
     def set_translation(self, translation, absolute=True):
-        print("Sorry, translation of an assembly is not yet implemented!")
+
         translation = np.asarray(translation)
-        if not translation.shape == (3,):
+        if not translation.shape == (3, ):
             print("Shift has to be a 3 x 1 array of dx, dy, dz")
             return 1
 
-        self._local_to_global_transformation.set_translation(translation, absolute=absolute)
+        self._transformation.set_translation(translation, absolute=absolute)
         self._full_mesh = None
 
     def set_rotation_angle_axis(self, angle, axis, absolute=True):
+
+        axis = np.asarray(axis)
+        if not axis.shape == (3, ) and type(angle) == float:
+            print("Angle has to be a float (rad) and axis be of shape (3, )")
+            return 1
+
+        self._transformation.set_rotation_from_angle_axis(angle, axis, absolute=absolute)
+        self._full_mesh = None
+
         print("Sorry, rotation of an assembly is not yet implemented!")
-        # self._local_to_global_transformation.set_rotation_from_angle_axis(angle, axis, absolute=absolute)
 
     @staticmethod
     def _debug_message(*args, rank=0):
@@ -182,6 +225,8 @@ class PyElectrodeAssembly(object):
     def points_inside(self, _points):
 
         _ts = time.time()
+
+        _points = self._transformation.apply_inverse_to_points(_points)  # To take into account the assembly glob. trafo
 
         self._debug_message("\n*** Calculating is_inside for {} points ***".format(_points.shape[0]))
 
@@ -241,10 +286,8 @@ class PyElectrodeAssembly(object):
                                "elems": elements,
                                "domns": domains}
 
-            # Apply assembly transformation here
-            print("Vertices.shape = ", vertices.shape)
-            print("First vertex = ", vertices[0])
-            exit()
+            # Apply assembly global transformation here
+            vertices = self._transformation.apply_to_points(vertices.T).T
 
             if DEBUG:
                 bempp.api.grid.grid_from_element_data(vertices,
@@ -268,15 +311,24 @@ class PyElectrodeAssembly(object):
         if display is None:
 
             display, start_display, _, _ = init_display()
-            display.set_bg_gradient_color([175, 210, 255], [255, 255, 255])
+            display.set_bg_gradient_color(OCC_GRADIENT1, OCC_GRADIENT2)
 
         for _id, _electrode in self._electrodes.items():
             if _electrode is not None:
-                display, ais_shape = _electrode.show(display=display)
-
-                # ais_shape                     is a Handle_AIS_Shape
-                # ais_shape.GetObject()         is a AIS_Shape
-                # ais_shape.GetObject().Shape() is a TopoDS_Shape and corresponds to _electrode._occ_obj._elec
+                # --- Apply tranformation --- #
+                # First, make a copy of the old object to use for display purposes
+                _elec_copy = copy.deepcopy(_electrode)
+                # Apply global transformation to _occ_obj of copy
+                # TODO: Write function in CoordinateTransformation3D that returns the OCC gp_Vec and gp_Quaternion
+                _elec_copy.occ_obj.apply_second_transformation(translation=gp_Vec(self._transformation.translation[0],
+                                                                                  self._transformation.translation[1],
+                                                                                  self._transformation.translation[2]),
+                                                               rotation=gp_Quaternion(self._transformation.rotation.x,
+                                                                                      self._transformation.rotation.y,
+                                                                                      self._transformation.rotation.z,
+                                                                                      self._transformation.rotation.w))
+                # display transformed copy
+                display, ais_shape = _elec_copy.show(display=display)  # ais_shape.GetObject().Shape() holds DS_Shape
 
         if show_screen:
             display.FitAll()
@@ -307,7 +359,7 @@ class PyElectrode(object):
         self._occ_obj = None
         self._bempp_domain = None
 
-        self._local_to_global_transformation = CoordinateTransformation3D()
+        self._transformation = CoordinateTransformation3D()
 
         self._initialized = False
 
@@ -346,18 +398,22 @@ class PyElectrode(object):
         return self._name
 
     @property
+    def occ_obj(self):
+        return self._occ_obj
+
+    @property
     def voltage(self):
         return self._voltage
 
     @property
     def local_to_global_transformation(self):
-        return self._local_to_global_transformation
+        return self._transformation
 
     @local_to_global_transformation.setter
     def local_to_global_transformation(self, trafo):
 
         if isinstance(trafo, CoordinateTransformation3D):
-            self._local_to_global_transformation = trafo
+            self._transformation = trafo
         else:
             print("Can only set the full transformation as a CoordinateTransformation3D object! "
                   "Consider using set_translation(), set_rotation_angle_axis()")
@@ -369,11 +425,11 @@ class PyElectrode(object):
             print("Shift has to be a 3 x 1 array of dx, dy, dz")
             return 1
         
-        self._local_to_global_transformation.set_translation(translation, absolute=absolute)
+        self._transformation.set_translation(translation, absolute=absolute)
 
     def set_rotation_angle_axis(self, angle, axis, absolute=True):
 
-        self._local_to_global_transformation.set_rotation_from_angle_axis(angle, axis, absolute=absolute)
+        self._transformation.set_rotation_from_angle_axis(angle, axis, absolute=absolute)
 
     @staticmethod
     def _debug_message(*args, rank=0):
@@ -410,8 +466,8 @@ class PyElectrode(object):
                                                                                        err_fn)
         elif self._originated_from in ["geo_str", "geo_file"]:
 
-            tx, ty, tz = self._local_to_global_transformation.translation
-            v_rot = quaternion.as_rotation_vector(self._local_to_global_transformation.rotation)
+            tx, ty, tz = self._transformation.translation
+            v_rot = quaternion.as_rotation_vector(self._transformation.rotation)
             angle = np.sqrt(np.sum(np.dot(v_rot, v_rot)))
 
             omit_t = omit_r = ""
@@ -522,8 +578,8 @@ class PyElectrode(object):
         self._debug_message("Generating from brep")
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
-        self._occ_obj.translation = self._local_to_global_transformation.translation
-        self._occ_obj.rotation = self._local_to_global_transformation.rotation
+        self._occ_obj.translation = self._transformation.translation
+        self._occ_obj.rotation = self._transformation.rotation
         error = self._occ_obj.load_from_brep(self._orig_file)
 
         if error:
@@ -555,8 +611,8 @@ class PyElectrode(object):
             return 1
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
-        self._occ_obj.translation = self._local_to_global_transformation.translation
-        self._occ_obj.rotation = self._local_to_global_transformation.rotation
+        self._occ_obj.translation = self._transformation.translation
+        self._occ_obj.rotation = self._transformation.rotation
         error = self._occ_obj.load_from_brep(brep_fn)
 
         if error:
@@ -569,8 +625,8 @@ class PyElectrode(object):
         self._debug_message("Generating from stl")
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
-        self._occ_obj.translation = self._local_to_global_transformation.translation
-        self._occ_obj.rotation = self._local_to_global_transformation.rotation
+        self._occ_obj.translation = self._transformation.translation
+        self._occ_obj.rotation = self._transformation.rotation
         error = self._occ_obj.load_from_stl(self._orig_file)
 
         if error:

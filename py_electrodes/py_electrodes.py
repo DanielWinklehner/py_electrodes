@@ -13,8 +13,8 @@ __doc__ = """Create electrodes using gmsh and pythonocc-core for use in field ca
 
 # --- Set global variables from Settings.txt file--- #
 settings = SettingsHandler()
-DEBUG = settings["DEBUG"]
-DECIMALS = settings["DECIMALS"]
+DEBUG = bool(settings["DEBUG"])
+DECIMALS = float(settings["DECIMALS"])
 GMSH_EXE = settings["GMSH_EXE"]
 TEMP_DIR = settings["TEMP_DIR"]
 

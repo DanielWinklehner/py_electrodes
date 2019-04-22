@@ -1,11 +1,10 @@
 import os
 import sys
 import platform
-import pickle
 
 
 class SettingsHandler(object):
-    """
+    r"""
     Class that handles the Settings.txt file. In both Windows and Linux, there are two locations:
     Preferred: $HOME/.local/lib/python<version>/site-packages/py_electrodes (Linux)
                $APPDATA/py_electrodes (Windows)  (usually C:\Users\<username>\AppData\Roaming)
@@ -23,9 +22,7 @@ class SettingsHandler(object):
             self._unix = False
 
         if self._unix:
-            self._path1 = "{}/.local/lib/python{}.{}/site-packages/py_electrodes".format(os.environ["HOME"],
-                                                                                         sys.version_info.major,
-                                                                                         sys.version_info.minor)
+            self._path1 = "{}/.local/py_electrodes".format(os.environ["HOME"])
         else:
             self._path1 = os.path.join("{}".format(os.environ['APPDATA']), "py_electrodes")
 
@@ -69,12 +66,30 @@ class SettingsHandler(object):
             print("No Settings.txt file found, creating in {}".format(filepath2))
             self.create_settings_file(filepath2)
 
+    @staticmethod
+    def parse(parse_string):
+        """
+        Parse a string and return a dict. This assumes each line is an entry of form key::item\n
+        :param parse_string:
+        :return: dictionary of read data
+        """
+        data_dict = {}
+
+        for line in parse_string:
+            if "::" in line:
+                res = line.strip().split("::")
+                data_dict[res[0]] = res[1]
+
+        return data_dict
+
     def read_from_file(self, filepath):
         with open(filepath, "r") as _if:
-            data = pickle.load(_if)
+            _data = _if.readlines()
+        data = self.parse(_data)
         for _key in self._settings.keys():
             self._settings[_key] = data.get(_key, self._settings[_key])
 
     def create_settings_file(self, filepath):
         with open(filepath, "w") as _of:
-            pickle.dump(self._settings, _of)
+            for key, item in self._settings.items():
+                _of.write("{}::{}\n".format(key, item))

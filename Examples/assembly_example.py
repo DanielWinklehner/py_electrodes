@@ -26,6 +26,5 @@ if __name__ == '__main__':
         pe.generate_from_file(_fn)
         pa.add_electrode(pe)
 
-    pa.show()
-
+    pa.show(show_screen=True)
     pa.get_bempp_mesh()

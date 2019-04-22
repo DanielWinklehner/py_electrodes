@@ -4,7 +4,7 @@ import numpy
 
 
 setup(name='py_electrodes',
-      version='0.0.2',
+      version='1.0.0',
       description='This module handles geometry objects using gmsh and OpenCasCade to be used as electrodes',
       url='https://github.com/DanielWinklehner/py_electrodes',
       author='Daniel Winklehner',

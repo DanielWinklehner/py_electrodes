@@ -29,6 +29,7 @@ https://conda.anaconda.org/conda-forge/win-64/cython-0.29.7-py36h6538335_0.tar.b
 https://conda.anaconda.org/conda-forge/win-64/libcblas-3.8.0-5_mkl.tar.bz2
 https://conda.anaconda.org/conda-forge/win-64/liblapack-3.8.0-5_mkl.tar.bz2
 https://repo.anaconda.com/pkgs/main/win-64/libpython-2.1-py36_0.tar.bz2
+https://conda.anaconda.org/conda-forge/win-64/llvmlite-0.24.0-py36_1.tar.bz2
 https://conda.anaconda.org/msys2/win-64/m2w64-gcc-libgfortran-5.3.0-6.tar.bz2
 https://conda.anaconda.org/msys2/win-64/m2w64-mpc-1.0.3-3.tar.bz2
 https://conda.anaconda.org/msys2/win-64/m2w64-winpthreads-git-5.0.0.4634.697f757-2.tar.bz2
@@ -38,6 +39,8 @@ https://conda.anaconda.org/conda-forge/win-64/numpy-1.16.2-py36h8078771_1.tar.bz
 https://conda.anaconda.org/conda-forge/win-64/setuptools-41.0.0-py36_0.tar.bz2
 https://conda.anaconda.org/msys2/win-64/m2w64-bzip2-1.0.6-6.tar.bz2
 https://conda.anaconda.org/msys2/win-64/m2w64-tools-git-5.0.0.4592.90b8472-2.tar.bz2
+https://repo.anaconda.com/pkgs/main/win-64/numba-0.39.0-py36h830ac7b_0.tar.bz2
+https://conda.anaconda.org/conda-forge/win-64/quaternion-2019.3.18.14.33.20-py36hc8d92b1_0.tar.bz2
 https://repo.anaconda.com/pkgs/main/win-64/scipy-1.2.1-py36h29ff71c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/win-64/wheel-0.33.1-py36_0.tar.bz2
 https://conda.anaconda.org/msys2/win-64/m2w64-zlib-1.2.8-10.tar.bz2

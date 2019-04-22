@@ -6,6 +6,7 @@ from .py_electrodes_occ import *
 import shutil
 import quaternion
 from .settings import SettingsHandler
+from .tk_filedialog import FileDialog
 
 __author__ = "Daniel Winklehner"
 __doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""
@@ -68,18 +69,6 @@ except ImportError:
     SIZE = 1
     import socket
     HOST = socket.gethostname()
-
-# For now, everything involving the pymodules with be done on master proc (RANK 0)
-if RANK == 0:
-
-    from dans_pymodules import *
-
-    COLORS = MyColors()
-
-else:
-
-    COLORS = None
-# ------------------------------------ #
 
 
 class CoordinateTransformation3D(object):

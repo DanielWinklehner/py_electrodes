@@ -1,5 +1,7 @@
 import numpy as np
 import quaternion
+import os
+import sys
 cimport numpy as np
 cimport cython
 

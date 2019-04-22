@@ -2,8 +2,8 @@
 classes and methods for creating electrode objects (solids with a voltage applied) using gmsh and OCC
 
 ## The Settings.txt file
-When the py_electrodes.py script is first loaded, it creates a Settings.txt file in
-the same directory that settings.py has been installed to 
+During installation a Settings.txt file is created in
+the same directory that settings.py is being installed to 
 (typically in _.../site-packages/py_electrodes/py_electrodes/_). The settings handler 
 will look for this Settings.txt file every time the script is loaded. The user can change 
 settings in this file. Better would be to copy it to a local directory.

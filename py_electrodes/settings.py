@@ -29,7 +29,7 @@ class SettingsHandler(object):
 
         self._settings = {"DEBUG": False,
                           "DECIMALS": 12,
-                          "TEMP_DIR": os.path.join(self._path2, "temp"),
+                          "TEMP_DIR": "temp",
                           "GMSH_EXE": "gmsh"}
 
         # Immediately load settings upon creation

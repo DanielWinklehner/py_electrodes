@@ -1,0 +1,4 @@
+DEBUG::False
+DECIMALS::12
+TEMP_DIR::temp
+GMSH_EXE::gmsh

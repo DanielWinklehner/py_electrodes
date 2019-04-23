@@ -503,14 +503,12 @@ class PyElectrode(object):
             print("Format not supported for meshing!")
             return 1
 
-        print("Running", command)
         sys.stdout.flush()
         gmsh_success = os.system(command)
 
         if gmsh_success != 0:
 
-            self._debug_message("Something went wrong with gmsh, be sure you defined "
-                                "the correct path at the beginning of the file!")
+            self._debug_message("Something went wrong with gmsh, output and error was saved in {}".format(TEMP_DIR))
             return 1
 
         self._gmsh_file = msh_fn
@@ -593,21 +591,23 @@ class PyElectrode(object):
 
         geo_fn = self._orig_file
         brep_fn = os.path.join(TEMP_DIR, "{}.brep".format(self._id))
+        sto_fn = os.path.join(TEMP_DIR, "{}_geo-to-brep.out".format(self._id))
+        err_fn = os.path.join(TEMP_DIR, "{}_geo-to-brep.err".format(self._id))
 
         gmsh_success = 0
 
         # Call gmsh to transform .geo file to .brep
-        command = "{} \"{}\" -0 -o \"{}\" -format brep".format(GMSH_EXE, geo_fn, brep_fn)
-        if RANK == 0 and DEBUG:
-            print("Running", command)
-            sys.stdout.flush()
+        command = "{} \"{}\" -0 -o \"{}\" -format brep 1>{} 2>{}".format(GMSH_EXE,
+                                                                         geo_fn,
+                                                                         brep_fn,
+                                                                         sto_fn,
+                                                                         err_fn)
+
+        self._debug_message("Running", command)
         gmsh_success += os.system(command)
 
         if gmsh_success != 0:
-
-            self._debug_message("Something went wrong with gmsh, be sure you defined "
-                                "the correct path at the beginning of the file!")
-
+            self._debug_message("Something went wrong with gmsh, output and error was saved in {}".format(TEMP_DIR))
             return 1
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
@@ -635,11 +635,6 @@ class PyElectrode(object):
             self._initialized = True
             return 0
 
-    # def _generate_from_step(self):
-    #     self._debug_message("Generating from step")
-    #
-    #     print("{}: Generating from step not yet implemented!".format(self._name))
-
     def show(self, display=None):
 
         if self._occ_obj is not None:
@@ -647,70 +642,6 @@ class PyElectrode(object):
             display, ais_shape = self._occ_obj.show(display, color=self._color)
 
         return display, ais_shape
-
-#     def generate_gmsh_files(self):
-#
-#         tmp_dir = TEMP_DIR
-#
-#         if tmp_dir is not None:
-#
-#             geo_fn = os.path.join(tmp_dir, "{}.geo".format(self.name))
-#             msh_fn = os.path.splitext(geo_fn)[0] + ".msh"
-#             stl_fn = os.path.splitext(geo_fn)[0] + ".stl"
-#             brep_fn = os.path.splitext(geo_fn)[0] + ".brep"
-#             refine_fn = os.path.join(tmp_dir, "refine_{}.geo".format(self.name))
-#
-#             gmsh_success = 0
-#
-#             with open(geo_fn, "w") as _of:
-#                 _of.write(self._geo_str)
-#
-#             command = "{} \"{}\" -0 -o \"{}\" -format brep".format(GMSH_EXE, geo_fn, brep_fn)
-#             if self._debug:
-#                 print("Running", command)
-#                 sys.stdout.flush()
-#             gmsh_success += os.system(command)
-#
-#             refine_str = """
-# Merge "{}";
-# Mesh.SecondOrderLinear = 0;
-# RefineMesh;
-# """.format(msh_fn)
-#
-#             with open(refine_fn, "w") as _of:
-#                 _of.write(refine_str)
-#
-#             # TODO: Could we use higher order (i.e. curved) meshes? -DW
-#             # For now, we need to save in msh2 format for BEMPP compability
-#             command = "{} \"{}\" -2 -o \"{}\" -format msh2".format(GMSH_EXE, geo_fn, msh_fn)
-#             if self._debug:
-#                 print("Running", command)
-#                 sys.stdout.flush()
-#             gmsh_success += os.system(command)
-#
-#             # for i in range(self._refine_steps):
-#             #     command = "{} \"{}\" -0 -o \"{}\" -format msh2".format(GMSH_EXE, refine_fn, msh_fn)
-#             #     if self._debug:
-#             #         print("Running", command)
-#             #         sys.stdout.flush()
-#             #     gmsh_success += os.system(command)
-#
-#             # --- TODO: For testing: save stl mesh file also
-#             command = "{} \"{}\" -0 -o \"{}\" -format stl".format(GMSH_EXE, msh_fn, stl_fn)
-#             if self._debug:
-#                 print("Running", command)
-#                 sys.stdout.flush()
-#             gmsh_success += os.system(command)
-#             # --- #
-#
-#             if gmsh_success != 0:  # or not os.path.isfile("shape.stl"):
-#                 print("Something went wrong with gmsh, be sure you defined "
-#                       "the correct path at the beginning of the file!")
-#                 return 1
-#
-#             # self._mesh_fn = msh_fn
-#
-#         return 0
 
     def points_inside(self, _points):
         """

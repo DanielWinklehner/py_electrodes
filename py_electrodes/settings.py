@@ -31,8 +31,8 @@ class SettingsHandler(object):
                           "DECIMALS": 12,
                           "TEMP_DIR": "temp",
                           "GMSH_EXE": "gmsh",
-                          "OCC_GRADIENT1": [175, 210, 255],
-                          "OCC_GRADIENT2": [255, 255, 255]}
+                          "OCC_GRADIENT1": "[175, 210, 255]",
+                          "OCC_GRADIENT2": "[255, 255, 255]"}
 
         # Immediately load settings upon creation
         self.load_settings()

@@ -19,7 +19,7 @@ DECIMALS = float(settings["DECIMALS"])
 GMSH_EXE = settings["GMSH_EXE"]
 TEMP_DIR = settings["TEMP_DIR"]
 OCC_GRADIENT1 = [int(item) for item in settings["OCC_GRADIENT1"].split("]")[0].split("[")[1].split(",")]
-OCC_GRADIENT2 = [int(item) for item in settings["OCC_GRADIENT1"].split("]")[0].split("[")[1].split(",")]
+OCC_GRADIENT2 = [int(item) for item in settings["OCC_GRADIENT2"].split("]")[0].split("[")[1].split(",")]
 
 # Temporary directory for saving intermittent files
 if os.path.exists(TEMP_DIR):

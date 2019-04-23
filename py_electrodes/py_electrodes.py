@@ -316,19 +316,27 @@ class PyElectrodeAssembly(object):
         for _id, _electrode in self._electrodes.items():
             if _electrode is not None:
                 # --- Apply tranformation --- #
-                # First, make a copy of the old object to use for display purposes
-                _elec_copy = copy.deepcopy(_electrode)
-                # Apply global transformation to _occ_obj of copy
+                # Apply global transformation to _occ_obj
                 # TODO: Write function in CoordinateTransformation3D that returns the OCC gp_Vec and gp_Quaternion
-                _elec_copy.occ_obj.apply_second_transformation(translation=gp_Vec(self._transformation.translation[0],
+                _electrode.occ_obj.apply_second_transformation(translation=gp_Vec(self._transformation.translation[0],
                                                                                   self._transformation.translation[1],
                                                                                   self._transformation.translation[2]),
                                                                rotation=gp_Quaternion(self._transformation.rotation.x,
                                                                                       self._transformation.rotation.y,
                                                                                       self._transformation.rotation.z,
                                                                                       self._transformation.rotation.w))
-                # display transformed copy
-                display, ais_shape = _elec_copy.show(display=display)  # ais_shape.GetObject().Shape() holds DS_Shape
+                # display transformed elec
+                display, ais_shape = _electrode.show(display=display)  # ais_shape.GetObject().Shape() holds DS_Shape
+
+                # after adding to display, back-transform (two steps: translation before rotation)
+                _electrode.occ_obj.apply_second_transformation(translation=gp_Vec(-self._transformation.translation[0],
+                                                                                  -self._transformation.translation[1],
+                                                                                  -self._transformation.translation[2]))
+                inv_quat = self._transformation.rotation.inverse()
+                _electrode.occ_obj.apply_second_transformation(rotation=gp_Quaternion(inv_quat.x,
+                                                                                      inv_quat.y,
+                                                                                      inv_quat.z,
+                                                                                      inv_quat.w))
 
         if show_screen:
             display.FitAll()

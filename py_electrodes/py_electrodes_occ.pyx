@@ -160,7 +160,7 @@ class PyOCCElectrode(object):
         update = False
 
         # First apply rotation
-        if rotation is None:
+        if rotation is not None:
             self._transformation.SetRotation(rotation)
             self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
             update = True

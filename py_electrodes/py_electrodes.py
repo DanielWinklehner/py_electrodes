@@ -241,6 +241,14 @@ class PyElectrodeAssembly(object):
 
         return _mask
 
+    def get_electrode_by_name(self, name):
+
+        for _, _elec in self.electrodes.items():
+            if name == _elec.name:
+                return _elec
+
+        return None
+
     def get_bempp_mesh(self, brep_h=0.005):
 
         if not HAVE_BEMPP:

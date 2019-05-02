@@ -242,12 +242,19 @@ class PyElectrodeAssembly(object):
         return _mask
 
     def get_electrode_by_name(self, name):
+        """
+        Get all electrodes with the given name
+        :param name: str
+        :return: list of electrodes with the given name. Empty list if there aren't any.
+        """
+
+        _elecs = []
 
         for _, _elec in self.electrodes.items():
             if name == _elec.name:
-                return _elec
+                _elecs.append(_elec)
 
-        return None
+        return _elecs
 
     def get_bempp_mesh(self, brep_h=0.005):
 

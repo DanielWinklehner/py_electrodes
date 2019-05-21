@@ -158,9 +158,10 @@ class CoordinateTransformation3D(object):
         :param absolute: Replace existing rotation or append (multiply with existing)
         :return:
         """
-        axis /= np.linalg.norm(axis)
-        axis *= angle
-        quat = quaternion.from_rotation_vector(axis)
+        qaxis = np.copy(axis)
+        qaxis /= np.linalg.norm(qaxis)
+        qaxis *= angle
+        quat = quaternion.from_rotation_vector(qaxis)
 
         if absolute:
             self._rotation = quat

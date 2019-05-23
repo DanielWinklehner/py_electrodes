@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import os
+import time
 import uuid
 from .py_electrodes_occ import *
 import shutil
@@ -267,7 +268,13 @@ class PyElectrodeAssembly(object):
             if name == _elec.name:
                 _elecs.append(_elec)
 
-        return _elecs
+        if len(_elecs) == 1:
+
+            return _elecs[0]
+
+        else:
+
+            return _elecs
 
     def get_bempp_mesh(self, brep_h=0.005):
 
@@ -710,6 +717,16 @@ class PyElectrode(object):
         if self._occ_obj is not None:
 
             return self._occ_obj.points_inside(_points)
+
+        else:
+
+            return 1
+
+    def export(self, filename):
+
+        if self._occ_obj is not None:
+
+            return self._occ_obj.export(filename)
 
         else:
 

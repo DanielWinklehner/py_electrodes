@@ -496,6 +496,16 @@ class PyOCCElectrode(object):
 
         return 0
 
+    def update_transformations(self):
+
+        self._transformation.SetRotation(self._rotation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
+        self._transformation.SetTranslation(self._translation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
+        return 0
+
 if __name__ == "__main__":
 
     pass

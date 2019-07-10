@@ -732,6 +732,21 @@ class PyElectrode(object):
 
             return 1
 
+    def update_transformations(self):
+        """
+        Re-applys rotations and translations to the OCC object
+        :return: 0
+        """
+
+        if not self._initialized:
+            return 1
+
+        self._occ_obj.translation = self._transformation.translation
+        self._occ_obj.rotation = self._transformation.rotation
+        self._occ_obj.update_transformations()
+
+        return 0
+
 
 if __name__ == "__main__":
     pass

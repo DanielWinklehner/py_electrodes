@@ -46,7 +46,7 @@ except ImportError:
 # --- Try importing pythonocc-core --- #
 HAVE_OCC = False
 try:
-    from OCC.Extend.DataExchange import read_stl_file, read_step_file
+    from OCC.Extend.DataExchange import *
     from OCC.Extend.TopologyUtils import TopologyExplorer
     from OCC.Core.BRepBndLib import brepbndlib_Add as bbox_add
     from OCC.Core.Bnd import Bnd_Box
@@ -479,6 +479,32 @@ class PyOCCElectrode(object):
 
         return display, ais_shape
 
+    def export(self, filename):
+
+        file_type = filename.split('.')[-1]
+
+        assert file_type in ['step', 'stp', 'stl', 'iges'], "File type must be '.step', '.stp', '.stl', or '.iges'!"
+
+        if file_type == 'step' or file_type == 'stp':
+            write_step_file(self._elec, filename, application_protocol="AP203")
+        elif file_type == 'stl':
+            write_stl_file(self._elec, filename)
+        elif file_type == 'iges':
+            write_iges_file(self._elec, filename)
+        else:
+            return 1
+
+        return 0
+
+    def update_transformations(self):
+
+        self._transformation.SetRotation(self._rotation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
+        self._transformation.SetTranslation(self._translation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
+        return 0
 
 if __name__ == "__main__":
 

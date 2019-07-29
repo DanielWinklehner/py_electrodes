@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import os
+import time
 import uuid
 from .py_electrodes_occ import *
 import shutil
@@ -47,6 +48,7 @@ HAVE_OCC = False
 try:
     from OCC.Display.SimpleGui import init_display
     from OCC.Core.gp import gp_Vec, gp_Quaternion
+
     HAVE_OCC = True
 except ImportError:
     init_display = None
@@ -55,20 +57,30 @@ except ImportError:
         print("Something went wrong during OCC import. No OpenCasCade support outside gmsh possible!")
 
 # --- Try importing BEMPP
-# TODO: Remove BEMPP dependency?
 HAVE_BEMPP = False
 try:
     import bempp.api
     from bempp.api.shapes.shapes import __generate_grid_from_geo_string as generate_from_string
+
     HAVE_BEMPP = True
 except ImportError:
     print("Couldn't import BEMPP, no meshing or BEM field calculation will be possible.")
     bempp = None
     generate_from_string = None
 
+# --- Try import meshio
+HAVE_MESHIO = False
+try:
+    import meshio
+
+    HAVE_MESHIO = True
+except ImportError:
+    meshio = None
+
 # --- Try importing mpi4py, if it fails, we fall back to single processor
 try:
     from mpi4py import MPI
+
     COMM = MPI.COMM_WORLD
     RANK = COMM.Get_rank()
     SIZE = COMM.Get_size()
@@ -82,6 +94,7 @@ except ImportError:
     RANK = 0
     SIZE = 1
     import socket
+
     HOST = socket.gethostname()
 
 
@@ -95,7 +108,7 @@ class CoordinateTransformation3D(object):
     def apply_to_points(self, points):
 
         points = np.asarray(points)
-        assert points.ndim == 2 and points[0].shape == (3, ), "points array needs to be of shape (N, 3)"
+        assert points.ndim == 2 and points[0].shape == (3,), "points array needs to be of shape (N, 3)"
 
         # Rotation first
         points = quaternion.rotate_vectors(self._rotation, points)
@@ -110,7 +123,7 @@ class CoordinateTransformation3D(object):
     def apply_inverse_to_points(self, points):
 
         points = np.asarray(points)
-        assert points.ndim == 2 and points[0].shape == (3, ), "points array needs to be of shape (N, 3)"
+        assert points.ndim == 2 and points[0].shape == (3,), "points array needs to be of shape (N, 3)"
 
         # Translation first
         points[:, 0] -= self._translation[0]
@@ -130,7 +143,7 @@ class CoordinateTransformation3D(object):
     @property
     def rotation(self):
         return self._rotation
-    
+
     def set_translation(self, translation, absolute=True):
         """
         Sets the new translation
@@ -141,7 +154,7 @@ class CoordinateTransformation3D(object):
 
         translation = np.asarray(translation)
 
-        if translation.shape == (3, ):
+        if translation.shape == (3,):
             if absolute:
                 self._translation = translation
             else:
@@ -155,9 +168,10 @@ class CoordinateTransformation3D(object):
         :param absolute: Replace existing rotation or append (multiply with existing)
         :return:
         """
-        axis /= np.linalg.norm(axis)
-        axis *= angle
-        quat = quaternion.from_rotation_vector(axis)
+        qaxis = np.copy(axis)
+        qaxis /= np.linalg.norm(qaxis)
+        qaxis *= angle
+        quat = quaternion.from_rotation_vector(qaxis)
 
         if absolute:
             self._rotation = quat
@@ -171,6 +185,7 @@ class PyElectrodeAssembly(object):
     exported to file, or a full mesh is calculated from it.
     It will not be applied to the individual electrodes!
     """
+
     def __init__(self,
                  name="New Assembly"):
 
@@ -199,7 +214,7 @@ class PyElectrodeAssembly(object):
     def set_translation(self, translation, absolute=True):
 
         translation = np.asarray(translation)
-        if not translation.shape == (3, ):
+        if not translation.shape == (3,):
             print("Shift has to be a 3 x 1 array of dx, dy, dz")
             return 1
 
@@ -209,7 +224,7 @@ class PyElectrodeAssembly(object):
     def set_rotation_angle_axis(self, angle, axis, absolute=True):
 
         axis = np.asarray(axis)
-        if not axis.shape == (3, ) and type(angle) == float:
+        if not axis.shape == (3,) and type(angle) == float:
             print("Angle has to be a float (rad) and axis be of shape (3, )")
             return 1
 
@@ -242,7 +257,6 @@ class PyElectrodeAssembly(object):
         _mask = np.zeros(_points.shape[0], dtype=bool)
 
         for _id, _electrode in self._electrodes.items():
-
             self._debug_message("[{}] Working on electrode object {}".format(
                 time.strftime('%H:%M:%S', time.gmtime(int(time.time() - _ts))), _electrode.name))
 
@@ -263,12 +277,18 @@ class PyElectrodeAssembly(object):
             if name == _elec.name:
                 _elecs.append(_elec)
 
-        return _elecs
+        if len(_elecs) == 1:
+
+            return _elecs[0]
+
+        else:
+
+            return _elecs
 
     def get_bempp_mesh(self, brep_h=0.005):
 
-        if not HAVE_BEMPP:
-            print("It looks like we can't find BEMPP. Aborting!")
+        if not HAVE_BEMPP and not HAVE_MESHIO:
+            print("It looks like we can't find BEMPP or meshio. Aborting!")
             return 1
 
         # TODO: Can this be expedited using cython or multiple cores? -DW
@@ -289,22 +309,40 @@ class PyElectrodeAssembly(object):
                 if _electrode.gmsh_file is None:
                     _electrode.generate_mesh(brep_h=brep_h)
 
-                mesh = bempp.api.import_grid(_electrode.gmsh_file)
+                if HAVE_BEMPP:
+                    mesh = bempp.api.import_grid(_electrode.gmsh_file)
 
-                _vertices = mesh.leaf_view.vertices
-                _elements = mesh.leaf_view.elements
-                _domain_ids = np.ones(len(mesh.leaf_view.domain_indices), int) * domain_counter
+                    _vertices = mesh.leaf_view.vertices
+                    _elements = mesh.leaf_view.elements
+                    _domain_ids = np.ones(len(mesh.leaf_view.domain_indices), int) * domain_counter
 
-                vertices = np.concatenate((vertices, _vertices), axis=1)
-                elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
-                domains = np.concatenate((domains, _domain_ids), axis=0)
+                    vertices = np.concatenate((vertices, _vertices), axis=1)
+                    elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
+                    domains = np.concatenate((domains, _domain_ids), axis=0)
 
-                # set current domain index in electrode object
-                _electrode.bempp_domain = domain_counter
+                    # set current domain index in electrode object
+                    _electrode.bempp_domain = domain_counter
 
-                # Increase the running counters
-                vertex_counter += _vertices.shape[1]
-                domain_counter += 1
+                    # Increase the running counters
+                    vertex_counter += _vertices.shape[1]
+                    domain_counter += 1
+                elif HAVE_MESHIO:
+                    # Note: This is only the 2D mesh.
+                    mesh = meshio.read(_electrode.gmsh_file)
+                    cell_data_tri = mesh.cell_data["triangle"]
+
+                    _vertices = mesh.points.T
+                    _elements = mesh.cells["triangle"].T
+                    _domain_ids = np.ones(len(cell_data_tri["gmsh:physical"]), int) * domain_counter
+
+                    vertices = np.concatenate((vertices, _vertices), axis=1)
+                    elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
+                    domains = np.concatenate((domains, _domain_ids), axis=0)
+
+                    _electrode.bempp_domain = domain_counter
+
+                    vertex_counter += _vertices.shape[1]
+                    domain_counter += 1
 
             self._full_mesh = {"verts": vertices,
                                "elems": elements,
@@ -314,9 +352,10 @@ class PyElectrodeAssembly(object):
             vertices = self._transformation.apply_to_points(vertices.T).T
 
             if DEBUG:
-                bempp.api.grid.grid_from_element_data(vertices,
-                                                      elements,
-                                                      domains).plot()
+                if HAVE_BEMPP:
+                    bempp.api.grid.grid_from_element_data(vertices,
+                                                          elements,
+                                                          domains).plot()
 
         if MPI is not None:
             # Broadcast results to all nodes
@@ -333,7 +372,6 @@ class PyElectrodeAssembly(object):
             return 1
 
         if display is None:
-
             display, start_display, _, _ = init_display()
             display.set_bg_gradient_color(OCC_GRADIENT1, OCC_GRADIENT2)
 
@@ -453,10 +491,10 @@ class PyElectrode(object):
     def set_translation(self, translation, absolute=True):
 
         translation = np.asarray(translation)
-        if not translation.shape == (3, ):
+        if not translation.shape == (3,):
             print("Shift has to be a 3 x 1 array of dx, dy, dz")
             return 1
-        
+
         self._transformation.set_translation(translation, absolute=absolute)
 
     def set_rotation_angle_axis(self, angle, axis, absolute=True):
@@ -504,11 +542,11 @@ class PyElectrode(object):
 
             omit_t = omit_r = ""
 
-            if np.abs(tx) + np.abs(ty) + np.abs(tz) < 1/DECIMALS:
+            if np.abs(tx) + np.abs(ty) + np.abs(tz) < 1 / DECIMALS:
                 # no translation... omit in geo file
                 omit_t = "//"
 
-            if np.abs(angle) <= 1/DECIMALS:
+            if np.abs(angle) <= 1 / DECIMALS:
                 # no rotation... omit in geo file
                 omit_r = "//"
 
@@ -539,7 +577,6 @@ class PyElectrode(object):
         gmsh_success = os.system(command)
 
         if gmsh_success != 0:
-
             self._debug_message("Something went wrong with gmsh, output and error was saved in {}".format(TEMP_DIR))
             return 1
 
@@ -670,7 +707,6 @@ class PyElectrode(object):
     def show(self, display=None):
 
         if self._occ_obj is not None:
-
             display, ais_shape = self._occ_obj.show(display, color=self._color)
 
         return display, ais_shape
@@ -694,6 +730,31 @@ class PyElectrode(object):
         else:
 
             return 1
+
+    def export(self, filename):
+
+        if self._occ_obj is not None:
+
+            return self._occ_obj.export(filename)
+
+        else:
+
+            return 1
+
+    def update_transformations(self):
+        """
+        Re-applys rotations and translations to the OCC object
+        :return: 0
+        """
+
+        if not self._initialized:
+            return 1
+
+        self._occ_obj.translation = self._transformation.translation
+        self._occ_obj.rotation = self._transformation.rotation
+        self._occ_obj.update_transformations()
+
+        return 0
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import shutil
 import quaternion
 from .settings import SettingsHandler
 from .tk_filedialog import FileDialog
+from .gmsh_installer import GmshInstaller
 import copy
 from pathlib import Path
 

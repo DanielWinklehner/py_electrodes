@@ -33,6 +33,15 @@ Z = 2
 AXES = {"X": 0, "Y": 1, "Z": 2}
 XYZ = range(3)  # All directions as a list
 
+HAVE_GMSH = True
+# Quick test if gmsh path is correct
+if not Path(GMSH_EXE).is_file():
+    print("I cannot find gmsh in the path specified in Settings.txt, starting gmsh installer...")
+    gi = GmshInstaller()
+    GMSH_EXE = gi.run()
+    if GMSH_EXE is None:
+        HAVE_GMSH = False
+
 # --- Test if we have OCC and Viewer
 HAVE_OCC = False
 try:

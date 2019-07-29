@@ -9,6 +9,7 @@ import quaternion
 from .settings import SettingsHandler
 from .tk_filedialog import FileDialog
 import copy
+from pathlib import Path
 
 __author__ = "Daniel Winklehner"
 __doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""

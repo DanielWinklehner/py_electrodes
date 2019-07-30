@@ -47,7 +47,7 @@ class GmshInstaller(object):
             with zipfile.ZipFile(self._gmsh_zip, "r") as zip_ref:
                 zip_ref.extractall(self._gmsh_zip_path)
         else:
-            with tarfile.open(self._gmsh_zip, "rb:tgz") as _tarfile:
+            with tarfile.open(self._gmsh_zip, "r:gz") as _tarfile:
                 _tarfile.extractall(self._gmsh_zip_path)
 
 

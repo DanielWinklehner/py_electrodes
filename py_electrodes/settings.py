@@ -94,3 +94,7 @@ class SettingsHandler(object):
         with open(filepath, "w") as _of:
             for key, item in self._settings.items():
                 _of.write("{}::{}\n".format(key, item))
+
+
+if __name__ == "__main__":
+    pass

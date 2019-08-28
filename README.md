@@ -51,3 +51,8 @@ Same process as above: ``conda install pythonocc-core-0.18.2-py36_vc14h24bf2e0_2
 
 _In a future release of OCE and PythonOCC-Core, it might work with a simple 
 __conda install -c tpaviot -c oce pythonocc-core___
+
+## Setting up the Anaconda3 environment in Ubuntu
+
+It looks like the 3D rendering drivers are missing in a vanilla Ubuntu 18 installation, install them using:
+``sudo apt-get install libglu1-mesa``

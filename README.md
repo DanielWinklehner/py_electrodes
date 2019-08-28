@@ -52,7 +52,20 @@ Same process as above: ``conda install pythonocc-core-0.18.2-py36_vc14h24bf2e0_2
 _In a future release of OCE and PythonOCC-Core, it might work with a simple 
 __conda install -c tpaviot -c oce pythonocc-core___
 
-## Setting up the Anaconda3 environment in Ubuntu
+## Setting up the Anaconda3 environment in Ubuntu 18
+Create an environment using the attached ubuntu spec file:
+
+``conda create --name py_electrodes_env --file spec-file-win.txt``
 
 It looks like the 3D rendering drivers are missing in a vanilla Ubuntu 18 installation, install them using:
+
 ``sudo apt-get install libglu1-mesa``
+
+Note: OCE and Pythonocc-Core are included in anaconda on ubuntu.
+
+## Dark theme
+On both Windows and Linux, the qdarkstyle theme can be installed using
+
+``pip install qdarkstyle==2.6.8``
+
+Note: the newest version (2.7) has some bugs (missing frames), so we are sticking with 2.6.8 for now.

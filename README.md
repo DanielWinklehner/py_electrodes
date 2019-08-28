@@ -23,6 +23,10 @@ The settings handler wil look in those directories first and in the package path
 second. 
 
 ## Setting up the Anaconda3 environment in Windows
+
+__WARNING: This used to work until 08/22/2019. Now there is a persistent OCC error that 
+we haven't figured out yet! Currently, it is not working under Windows. :(__
+
 Create an environment using the attached windows spec file:
 
 ``conda create --name py_electrodes_env --file spec-file-win.txt``

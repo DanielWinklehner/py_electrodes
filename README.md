@@ -59,7 +59,7 @@ __conda install -c tpaviot -c oce pythonocc-core___
 ## Setting up the Anaconda3 environment in Ubuntu 18
 Create an environment using the attached ubuntu spec file:
 
-``conda create --name py_electrodes_env --file spec-file-win.txt``
+``conda create --name py_electrodes_env --file spec-file-ubuntu18.txt``
 
 It looks like the 3D rendering drivers are missing in a vanilla Ubuntu 18 installation, install them using:
 

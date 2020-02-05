@@ -304,7 +304,7 @@ class PyOCCElectrode(object):
 
         if use_mesh:
             mesh = BRepMesh_IncrementalMesh()
-            mesh.SetParallel(True)
+            mesh.SetParallelDefault(True))
             mesh.SetShape(elec)
             mesh.Perform()
 

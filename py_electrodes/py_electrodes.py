@@ -3,13 +3,15 @@ import sys
 import os
 import time
 import uuid
-from .py_electrodes_occ import *
+# noinspection PyUnresolvedReferences
+from .py_electrodes_occ import *  # PyCharm Commmunity doesn't recognize cython pyx files :)
 import shutil
-import quaternion
+# noinspection PyPackageRequirements
+import quaternion  # package name is numpy-quaternion
 from .settings import SettingsHandler
 from .tk_filedialog import FileDialog
 from .gmsh_installer import GmshInstaller
-import copy
+# import copy
 from pathlib import Path
 
 __author__ = "Daniel Winklehner"

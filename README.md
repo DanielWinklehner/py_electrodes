@@ -22,54 +22,33 @@ _$HOME/.local/py_electrodes/Settings.txt_
 The settings handler wil look in those directories first and in the package path 
 second. 
 
-## Setting up the Anaconda3 environment in Windows
+## Setting up the Anaconda3 environment
 
-__WARNING: This used to work until 08/22/2019. Now there is a persistent OCC error that 
-we haven't figured out yet! Currently, it is not working under Windows. :(__
+With the new version of OpenCascade (OCC) and 
+[pythonocc-core](https://github.com/tpaviot/pythonocc-core) (7.4.0), a simple 
+anaconda installation from yml file is possible. The file _environment.yml_ 
+can be found in /py_electrodes/documents. 
 
-Create an environment using the attached windows spec file:
+simply create a new Anaconda3 environment from the Navigator (Environments-->Import)
+or from the command line
 
-``conda create --name py_electrodes_env --file spec-file-win.txt``
+``conda env create -f environment.yml``
 
-This configuration includes minGW, libpython, and m2w64-toolchain from msys2. Together, 
-they let you compile cython code during installation.
+The environment name can be changed in the yml file or with the _-name_ flag.
 
-Then install OCE and PythonOCC-Core (https://github.com/tpaviot/pythonocc-core). 
-Unfortunately, we require pythonocc-core==0.18.2 which seems not directly supported 
-for windows and python 3 at the moment. This workaround lets us install it, 
-but may break the conda environment.
-Thus it is advisable to do it last, after installing all other packages with conda
-(or just do it all on Ubuntu).
+### Additional notes for Windows
 
-#### OCE
-Download the latest Windows tarball with the right python version from here: https://anaconda.org/oce/oce/files
+A community edition of MS Visual Studio (2017 or newer) is also needed to compile 
+some of the c-extensions for cython. 
+Get it for free here: https://visualstudio.microsoft.com/downloads/
 
-Open a Anaconda environment (from Anaconda Navigator), go to the Downloads folder and run
-``conda install oce-0.18.3-vc14_3.win64.tar.bz2`` (or whichever file you downloaded).
+### Additional notes for Ubuntu 18 (WSL and local installation)
+In most cases the c compilers for cython are included in the Ubuntu installation.
+If not, the build-essential package should have what is needed.
 
-#### PythonOCC-Core
-Download the latest Windows tarball with the right python version from here: https://anaconda.org/tpaviot/pythonocc-core/files
+``sudo apt-get install build-essential``
 
-Same process as above: ``conda install pythonocc-core-0.18.2-py36_vc14h24bf2e0_281.tar.bz2`` 
-(or whichever file you downloaded).
-
-_In a future release of OCE and PythonOCC-Core, it might work with a simple 
-__conda install -c tpaviot -c oce pythonocc-core___
-
-## Setting up the Anaconda3 environment in Ubuntu 18
-Create an environment using the attached ubuntu spec file:
-
-``conda create --name py_electrodes_env --file spec-file-ubuntu18.txt``
-
-It looks like the 3D rendering drivers are missing in a vanilla Ubuntu 18 installation, install them using:
+It looks like the 3D rendering drivers are missing in a vanilla Ubuntu 18 installation, 
+install them using:
 
 ``sudo apt-get install libglu1-mesa``
-
-Note: OCE and Pythonocc-Core are included in anaconda on ubuntu.
-
-## Dark theme
-On both Windows and Linux, the qdarkstyle theme can be installed using
-
-``pip install qdarkstyle==2.6.8``
-
-Note: the newest version (2.7) has some bugs (missing frames), so we are sticking with 2.6.8 for now.

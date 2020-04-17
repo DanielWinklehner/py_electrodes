@@ -48,6 +48,7 @@ dependencies:
   - wheel=0.34.2
   - zlib=1.2.11
   - pip:
+    - meshio==4.0.10
     - numpy-quaternion==2019.12.11.22.25.52
     - pyqt5-sip==4.19.18
     - pyqtwebengine==5.12.1

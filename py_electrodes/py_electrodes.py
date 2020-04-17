@@ -313,31 +313,20 @@ class PyElectrodeAssembly(object):
                 if _electrode.gmsh_file is None:
                     _electrode.generate_mesh(brep_h=brep_h)
 
-                if HAVE_BEMPP:
-                    mesh = bempp.api.import_grid(_electrode.gmsh_file)
-
-                    _vertices = mesh.leaf_view.vertices
-                    _elements = mesh.leaf_view.elements
-                    _domain_ids = np.ones(len(mesh.leaf_view.domain_indices), int) * domain_counter
-
-                    vertices = np.concatenate((vertices, _vertices), axis=1)
-                    elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
-                    domains = np.concatenate((domains, _domain_ids), axis=0)
-
-                    # set current domain index in electrode object
-                    _electrode.bempp_domain = domain_counter
-
-                    # Increase the running counters
-                    vertex_counter += _vertices.shape[1]
-                    domain_counter += 1
-                elif HAVE_MESHIO:
+                if HAVE_MESHIO:
                     # Note: This is only the 2D mesh.
                     mesh = meshio.read(_electrode.gmsh_file)
-                    cell_data_tri = mesh.cell_data["triangle"]
+                    # cell_data_tri = mesh.cell_data["triangle"]
 
                     _vertices = mesh.points.T
-                    _elements = mesh.cells["triangle"].T
-                    _domain_ids = np.ones(len(cell_data_tri["gmsh:physical"]), int) * domain_counter
+                    # _elements = mesh.cells["triangle"].T
+                    for cellblock in mesh.cells:
+                        if cellblock.type == "triangle":
+                            _elements = cellblock.data.T
+
+                    # _domain_ids = np.ones(len(cell_data_tri["gmsh:physical"]), int) * domain_counter
+                    # _domain_ids = np.ones(len(mesh.cell_data["gmsh:physical"]), int) * domain_counter
+                    _domain_ids = np.ones(_elements.shape[1], int) * domain_counter
 
                     vertices = np.concatenate((vertices, _vertices), axis=1)
                     elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
@@ -347,6 +336,25 @@ class PyElectrodeAssembly(object):
 
                     vertex_counter += _vertices.shape[1]
                     domain_counter += 1
+
+                # elif HAVE_BEMPP:
+                #     print("_electrode.gmsh_file", _electrode.gmsh_file)
+                #     mesh = bempp.api.import_grid(_electrode.gmsh_file)
+                #
+                #     _vertices = mesh.leaf_view.vertices
+                #     _elements = mesh.leaf_view.elements
+                #     _domain_ids = np.ones(len(mesh.leaf_view.domain_indices), int) * domain_counter
+                #
+                #     vertices = np.concatenate((vertices, _vertices), axis=1)
+                #     elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
+                #     domains = np.concatenate((domains, _domain_ids), axis=0)
+                #
+                #     # set current domain index in electrode object
+                #     _electrode.bempp_domain = domain_counter
+                #
+                #     # Increase the running counters
+                #     vertex_counter += _vertices.shape[1]
+                #     domain_counter += 1
 
             self._full_mesh = {"verts": vertices,
                                "elems": elements,

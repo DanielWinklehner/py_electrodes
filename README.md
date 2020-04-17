@@ -1,5 +1,7 @@
 # py_electrodes
-classes and methods for creating electrode objects (solids with a voltage applied) using gmsh and OCC
+classes and methods for creating electrode objects (solids with a voltage applied) using 
+[gmsh](https://gmsh.info/) 
+and [pythonocc-core](https://github.com/tpaviot/pythonocc-core). 
 
 ## The Settings.txt file
 During installation a Settings.txt file is created in
@@ -20,19 +22,22 @@ In Linux it should be:
 _$HOME/.local/py_electrodes/Settings.txt_
 
 The settings handler wil look in those directories first and in the package path 
-second. 
+second.
 
 ## Setting up the Anaconda3 environment
 
-With the new version of OpenCascade (OCC) and 
+With the new version of 
+[Open Cascade](https://www.opencascade.com/) and 
 [pythonocc-core](https://github.com/tpaviot/pythonocc-core) (7.4.0), a simple 
 anaconda installation from yml file is possible. The file _environment.yml_ 
-can be found in /py_electrodes/documents. 
+can be found in _py_electrodes/documents/_. 
 
 simply create a new Anaconda3 environment from the Navigator (Environments-->Import)
 or from the command line
 
-``conda env create -f environment.yml``
+```bash
+conda env create -f environment.yml
+```
 
 The environment name can be changed in the yml file or with the _-name_ flag.
 
@@ -46,9 +51,13 @@ Get it for free here: https://visualstudio.microsoft.com/downloads/
 In most cases the c compilers for cython are included in the Ubuntu installation.
 If not, the build-essential package should have what is needed.
 
-``sudo apt-get install build-essential``
+```bash
+sudo apt-get install build-essential
+```
 
 It looks like the 3D rendering drivers are missing in a vanilla Ubuntu 18 installation, 
 install them using:
 
-``sudo apt-get install libglu1-mesa``
+```bash
+sudo apt-get install libglu1-mesa
+````

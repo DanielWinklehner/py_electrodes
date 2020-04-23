@@ -65,6 +65,7 @@ HAVE_BEMPP = False
 try:
     import bempp.api
     from bempp.api.shapes.shapes import __generate_grid_from_geo_string as generate_from_string
+    from bempp.api.grid import Grid as BemppGrid
 
     HAVE_BEMPP = True
 except ImportError:
@@ -365,9 +366,8 @@ class PyElectrodeAssembly(object):
 
             if DEBUG:
                 if HAVE_BEMPP:
-                    bempp.api.grid.grid_from_element_data(vertices,
-                                                          elements,
-                                                          domains).plot()
+                    bempp.api.PLOT_BACKEND = "gmsh"
+                    BemppGrid(vertices, elements, domains).plot()
 
         if MPI is not None:
             # Broadcast results to all nodes
@@ -527,8 +527,7 @@ class PyElectrode(object):
             return 1
 
         msh_fn = os.path.join(TEMP_DIR, "{}.msh".format(self._id))
-        sto_fn = os.path.join(TEMP_DIR, "{}_gmsh.out".format(self._id))
-        err_fn = os.path.join(TEMP_DIR, "{}_gmsh.err".format(self._id))
+        log_fn = os.path.join(TEMP_DIR, "{}_gmsh.log".format(self._id))
 
         # For now, we need to save in msh2 format for BEMPP compability
         # gmsh can handle geo, brep and stl the same way. However, brep has no mesh resolution
@@ -540,12 +539,11 @@ class PyElectrode(object):
         # TODO: This is assuming the user has defined a volume in geo string or geo file...
         if self._originated_from == "brep":
 
-            command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2 1>{} 2>{}".format(GMSH_EXE,
-                                                                                       self._orig_file,
-                                                                                       brep_h,
-                                                                                       msh_fn,
-                                                                                       sto_fn,
-                                                                                       err_fn)
+            command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2 -log {}".format(GMSH_EXE,
+                                                                                     self._orig_file,
+                                                                                     brep_h,
+                                                                                     msh_fn,
+                                                                                     log_fn)
         elif self._originated_from in ["geo_str", "geo_file"]:
 
             tx, ty, tz = self._transformation.translation
@@ -571,12 +569,11 @@ class PyElectrode(object):
             with open(transform_fn, "w") as _of:
                 _of.write(transform_str)
 
-            command = "{} \"{}\" \"{}\" -2 -o \"{}\" -format msh2 1>{} 2>{}".format(GMSH_EXE,
-                                                                                    self._orig_file,
-                                                                                    transform_fn,
-                                                                                    msh_fn,
-                                                                                    sto_fn,
-                                                                                    err_fn)
+            command = "{} \"{}\" \"{}\" -2 -o \"{}\" -format msh2 -log {}".format(GMSH_EXE,
+                                                                                  self._orig_file,
+                                                                                  transform_fn,
+                                                                                  msh_fn,
+                                                                                  log_fn)
 
         elif self._originated_from == "stl":
             print("Meshing with transformations from stl not yet implemented")
@@ -589,8 +586,19 @@ class PyElectrode(object):
         gmsh_success = os.system(command)
 
         if gmsh_success != 0:
-            self._debug_message("Something went wrong with gmsh, output and error was saved in {}".format(TEMP_DIR))
-            return 1
+
+            # Catch error messages related to transfinite algorithm (mesh will still be produced)
+            with open(log_fn, 'r') as infile:
+                lines = infile.readlines()
+
+            ignore_error = True
+            for line in lines:
+                if "Error" in line and "cannot be meshed using the transfinite algo" not in line:
+                    ignore_error = False
+
+            if not ignore_error:
+                self._debug_message("Something went wrong with gmsh, log file was saved in {}".format(TEMP_DIR))
+                return 1
 
         self._gmsh_file = msh_fn
 

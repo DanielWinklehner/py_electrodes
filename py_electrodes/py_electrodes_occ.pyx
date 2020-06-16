@@ -104,6 +104,10 @@ class PyOCCElectrode(object):
         self._filename = None
 
     @property
+    def ds_shape(self):
+        return self._elec
+
+    @property
     def translation(self):
         return self._translation
 

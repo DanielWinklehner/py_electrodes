@@ -50,10 +50,14 @@ if not Path(GMSH_EXE).is_file():
 # --- Test if we have OCC and Viewer
 HAVE_OCC = False
 try:
+    from OCC.Extend.DataExchange import *
     from OCC.Display.SimpleGui import init_display
     from OCC.Core.gp import gp_Vec, gp_Quaternion
+    from OCC.Core.TopoDS import TopoDS_Compound
+    from OCC.Core.BRep import BRep_Builder
 
     HAVE_OCC = True
+
 except ImportError:
     init_display = None
     gp_Vec = gp_Quaternion = None
@@ -216,6 +220,32 @@ class PyElectrodeAssembly(object):
             print("Can only set the full transformation as a CoordinateTransformation3D object! "
                   "Consider using set_translation(), set_rotation_angle_axis()")
 
+    def export(self, filename):
+        # TODO: Add transformation! -DW
+
+        file_type = filename.split('.')[-1]
+
+        assert file_type in ['step', 'stp', 'stl', 'iges'], "File type must be '.step', '.stp', '.stl', or '.iges'!"
+
+        # Assemble all occ_electrodes into a compound
+        builder = BRep_Builder()
+        compound = TopoDS_Compound()
+        builder.MakeCompound(compound)
+        for key, item in self.electrodes.items():
+            builder.Add(compound, item.occ_obj.ds_shape)
+
+        # Save compound to file
+        if file_type == 'step' or file_type == 'stp':
+            write_step_file(compound, filename, application_protocol="AP203")
+        elif file_type == 'stl':
+            write_stl_file(compound, filename)
+        elif file_type == 'iges':
+            write_iges_file(compound, filename)
+        else:
+            return 1
+
+        return 0
+
     def set_translation(self, translation, absolute=True):
 
         translation = np.asarray(translation)
@@ -327,13 +357,15 @@ class PyElectrodeAssembly(object):
 
                     # _domain_ids = np.ones(len(cell_data_tri["gmsh:physical"]), int) * domain_counter
                     # _domain_ids = np.ones(len(mesh.cell_data["gmsh:physical"]), int) * domain_counter
-                    _domain_ids = np.ones(_elements.shape[1], int) * domain_counter
+                    # TODO: This seems dangerous for mixed cases where some electrodes have a bempp domain -DW
+                    dom_idx = _electrode.bempp_domain if _electrode.bempp_domain is not None else domain_counter
+                    _domain_ids = np.ones(_elements.shape[1], int) * dom_idx
 
                     vertices = np.concatenate((vertices, _vertices), axis=1)
                     elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
                     domains = np.concatenate((domains, _domain_ids), axis=0)
 
-                    _electrode.bempp_domain = domain_counter
+                    _electrode.bempp_domain = dom_idx  # Override if simple enumeration was used
 
                     vertex_counter += _vertices.shape[1]
                     domain_counter += 1

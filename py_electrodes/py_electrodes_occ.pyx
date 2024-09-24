@@ -48,7 +48,7 @@ HAVE_OCC = False
 try:
     from OCC.Extend.DataExchange import *
     from OCC.Extend.TopologyUtils import TopologyExplorer
-    from OCC.Core.BRepBndLib import brepbndlib_Add as bbox_add
+    from OCC.Core.BRepBndLib.brepbndlib import Add as bbox_add
     from OCC.Core.Bnd import Bnd_Box
     from OCC.Core.gp import gp_Pnt, gp_Vec, gp_Trsf, gp_Quaternion
     from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier

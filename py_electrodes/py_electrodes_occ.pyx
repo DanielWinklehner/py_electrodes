@@ -6,9 +6,9 @@ cimport numpy as np
 cimport cython
 
 DTYPE1 = np.float64
-DTYPE2 = np.int
+DTYPE2 = np.int64
 ctypedef np.float64_t DTYPE1_t
-ctypedef np.int_t DTYPE2_t
+ctypedef np.int64_t DTYPE2_t
 
 # --- Some global variables --- #
 # Display debug messages?

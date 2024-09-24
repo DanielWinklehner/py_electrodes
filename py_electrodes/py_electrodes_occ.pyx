@@ -48,13 +48,13 @@ HAVE_OCC = False
 try:
     from OCC.Extend.DataExchange import *
     from OCC.Extend.TopologyUtils import TopologyExplorer
-    from OCC.Core.BRepBndLib.brepbndlib import Add as bbox_add
+    import OCC.Core.BRepBndLib as BRepBndLib
     from OCC.Core.Bnd import Bnd_Box
     from OCC.Core.gp import gp_Pnt, gp_Vec, gp_Trsf, gp_Quaternion
     from OCC.Core.BRepClass3d import BRepClass3d_SolidClassifier
     from OCC.Core.TopAbs import TopAbs_ON, TopAbs_OUT, TopAbs_IN
     from OCC.Core.BRep import BRep_Builder
-    from OCC.Core.BRepTools import breptools_Read
+    import OCC.Core.BRepTools as BRepTools
     from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Transform
     from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Solid
     from OCC.Core.BRepPrimAPI import BRepPrimAPI_MakeBox
@@ -240,7 +240,7 @@ class PyOCCElectrode(object):
         sys.stdout.flush()
 
         load_shape = TopoDS_Shape()
-        breptools.Read(load_shape, filename, self._bldr)
+        BRepTools.breptools.Read(load_shape, filename, self._bldr)
 
         # The loaded shape is a compound of solid, shell, surfs, lines and points. We select the solid only.
         # TODO: some assertions, right now we put a lot of faith in the user.
@@ -314,7 +314,7 @@ class PyOCCElectrode(object):
 
             assert mesh.IsDone()
 
-        bbox_add(elec, _bbox, use_mesh)
+        BRepBndLib.brepbndlib.Add(elec, _bbox, use_mesh)
 
         return _bbox
 

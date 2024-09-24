@@ -240,7 +240,7 @@ class PyOCCElectrode(object):
         sys.stdout.flush()
 
         load_shape = TopoDS_Shape()
-        breptools_Read(load_shape, filename, self._bldr)
+        breptools.Read(load_shape, filename, self._bldr)
 
         # The loaded shape is a compound of solid, shell, surfs, lines and points. We select the solid only.
         # TODO: some assertions, right now we put a lot of faith in the user.

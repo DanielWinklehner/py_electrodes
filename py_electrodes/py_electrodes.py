@@ -16,6 +16,12 @@ from pathlib import Path
 import warnings
 import logging
 import enum
+import subprocess
+import tempfile
+import atexit
+
+TEMP_DIR = tempfile.mkdtemp(prefix="py_electrodes_")
+atexit.register(lambda: shutil.rmtree(TEMP_DIR, ignore_errors=True))
 
 __author__ = "Daniel Winklehner"
 __doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""
@@ -25,14 +31,14 @@ settings = SettingsHandler()
 DEBUG = (settings["DEBUG"] == "True")
 DECIMALS = float(settings["DECIMALS"])
 GMSH_EXE = settings["GMSH_EXE"]
-TEMP_DIR = settings["TEMP_DIR"]
+# TEMP_DIR = settings["TEMP_DIR"]
 OCC_GRADIENT1 = [int(item) for item in settings["OCC_GRADIENT1"].split("]")[0].split("[")[1].split(",")]
 OCC_GRADIENT2 = [int(item) for item in settings["OCC_GRADIENT2"].split("]")[0].split("[")[1].split(",")]
 
 # Temporary directory for saving intermittent files
-if os.path.exists(TEMP_DIR):
-    shutil.rmtree(TEMP_DIR)
-os.mkdir(TEMP_DIR)
+# if os.path.exists(TEMP_DIR):
+#     shutil.rmtree(TEMP_DIR)
+# os.mkdir(TEMP_DIR)
 
 # Define the axis directions and vane rotations:
 X = 0
@@ -446,7 +452,7 @@ class PyElectrodeAssembly(object):
 
                 # elif HAVE_BEMPP:
                 #     print("_electrode.gmsh_file", _electrode.gmsh_file)
-                #     mesh = bempp.api.import_grid(_electrode.gmsh_file)
+                #     mesh = bempp_cl.api.import_grid(_electrode.gmsh_file)
                 #
                 #     _vertices = mesh.leaf_view.vertices
                 #     _elements = mesh.leaf_view.elements
@@ -472,7 +478,7 @@ class PyElectrodeAssembly(object):
 
             if DEBUG:
                 if HAVE_BEMPP:
-                    bempp.api.PLOT_BACKEND = "gmsh"
+                    bempp_cl.api.PLOT_BACKEND = "gmsh"
                     BemppGrid(vertices, elements, domains).plot()
 
         if MPI is not None:
@@ -876,11 +882,33 @@ class PyElectrode(object):
         # TODO: This is assuming the user has defined a volume in geo string or geo file...
         if self._originated_from == "brep":
 
-            command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2 -log {}".format(GMSH_EXE,
-                                                                                     self._orig_file,
-                                                                                     brep_h,
-                                                                                     msh_fn,
-                                                                                     log_fn)
+            # command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2 -log {}".format(GMSH_EXE,
+            #                                                                          self._orig_file,
+            #                                                                          brep_h,
+            #                                                                          msh_fn,
+            #                                                                          log_fn)
+
+            try:
+                result = subprocess.run(
+                    [GMSH_EXE, self._orig_file, "-2", "-clmax", brep_h, "-o", msh_fn, "-format", "msh2"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+
+                gmsh_success = result.returncode
+
+                if result.returncode != 0:
+                    self._debug_message(f"gmsh stderr: {result.stderr}")
+
+            except subprocess.TimeoutExpired:
+                self._debug_message("gmsh timed out after 60 seconds")
+                gmsh_success = 1
+
+            except Exception as e:
+                self._debug_message(f"Error running gmsh: {e}")
+                gmsh_success = 1
+
         elif self._originated_from in ["geo_str", "geo_file"]:
 
             tx, ty, tz = self._transformation.translation
@@ -906,11 +934,34 @@ class PyElectrode(object):
             with open(transform_fn, "w") as _of:
                 _of.write(transform_str)
 
-            command = "{} \"{}\" \"{}\" -2 -o \"{}\" -format msh2 -log {}".format(GMSH_EXE,
-                                                                                  self._orig_file,
-                                                                                  transform_fn,
-                                                                                  msh_fn,
-                                                                                  log_fn)
+            # command = "{} \"{}\" \"{}\" -2 -o \"{}\" -format msh2 -log {}".format(GMSH_EXE,
+            #                                                                       self._orig_file,
+            #                                                                       transform_fn,
+            #                                                                       msh_fn,
+            #                                                                       log_fn)
+
+            try:
+
+                result = subprocess.run(
+                    [GMSH_EXE, self._orig_file, transform_fn, "-2", "-o", msh_fn, "-format", "msh2"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+
+                gmsh_success = result.returncode
+
+                if result.returncode != 0:
+                    self._debug_message(f"gmsh stderr: {result.stderr}")
+
+            except subprocess.TimeoutExpired:
+                self._debug_message("gmsh timed out after 60 seconds")
+                gmsh_success = 1
+
+            except Exception as e:
+                self._debug_message(f"Error running gmsh: {e}")
+                gmsh_success = 1
+
 
         elif self._originated_from == "stl":
             print("Meshing with transformations from stl not yet implemented")
@@ -919,8 +970,8 @@ class PyElectrode(object):
             print("Format not supported for meshing!")
             return 1
 
-        sys.stdout.flush()
-        gmsh_success = os.system(command)
+        # sys.stdout.flush()
+        # gmsh_success = os.system(command)
 
         if gmsh_success != 0:
 
@@ -1023,18 +1074,39 @@ class PyElectrode(object):
         gmsh_success = 0
 
         # Call gmsh to transform .geo file to .brep
-        command = "{} \"{}\" -0 -o \"{}\" -format brep 1>{} 2>{}".format(GMSH_EXE,
-                                                                         geo_fn,
-                                                                         brep_fn,
-                                                                         sto_fn,
-                                                                         err_fn)
+        # command = "\"{}\" \"{}\" -0 -o \"{}\" -format brep 1>{} 2>{}".format(GMSH_EXE,
+        #                                                                  geo_fn,
+        #                                                                  brep_fn,
+        #                                                                  sto_fn,
+        #                                                                  err_fn)
+        #
+        # self._debug_message("Running", command)
+        # gmsh_success += os.system(command)
+        #
+        # if gmsh_success != 0:
+        #     self._debug_message("Something went wrong with gmsh, output and error was saved in {}".format(TEMP_DIR))
+        #     return 1
 
-        self._debug_message("Running", command)
-        gmsh_success += os.system(command)
+        try:
+            result = subprocess.run(
+                [GMSH_EXE, geo_fn, "-0", "-o", brep_fn, "-format", "brep"],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
 
-        if gmsh_success != 0:
-            self._debug_message("Something went wrong with gmsh, output and error was saved in {}".format(TEMP_DIR))
-            return 1
+            gmsh_success += result.returncode
+
+            if result.returncode != 0:
+                self._debug_message(f"gmsh stderr: {result.stderr}")
+
+        except subprocess.TimeoutExpired:
+            self._debug_message("gmsh timed out after 60 seconds")
+            gmsh_success += 1
+
+        except Exception as e:
+            self._debug_message(f"Error running gmsh: {e}")
+            gmsh_success += 1
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
         self._occ_obj.translation = self._transformation.translation

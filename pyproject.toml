@@ -1,0 +1,80 @@
+[build-system]
+requires = [
+    "setuptools>=65.0",
+    "wheel",
+    "Cython>=0.29.0",
+    "numpy>=1.19.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py_electrodes"
+version = "1.2.0"
+description = "Classes and methods for creating electrode objects using gmsh and pythonocc-core"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Daniel Winklehner", email = "winklehn@mit.edu"}
+]
+requires-python = ">=3.7"
+keywords = ["electrode", "gmsh", "opencascade", "geometry", "simulation"]
+
+dependencies = [
+    "numpy",
+    "numpy-quaternion",
+    "numba",
+    "cython",
+#    "pythonocc-core",
+    "meshio>=4.0.0",
+]
+
+[project.optional-dependencies]
+# GPU acceleration (optional, requires NVIDIA GPU + CUDA)
+gpu = [
+    "warp-lang>=0.10.0",
+    "kaolin>=0.15.0",
+    "torch>=2.0.0",
+]
+
+# Full development environment
+dev = [
+    "pytest>=6.0",
+    "pytest-cov",
+    "black",
+    "isort",
+    "flake8",
+]
+
+# Documentation
+docs = [
+    "sphinx>=4.0",
+    "sphinx-rtd-theme",
+]
+
+[project.urls]
+Homepage = "https://github.com/DanielWinklehner/py_electrodes"
+Repository = "https://github.com/DanielWinklehner/py_electrodes.git"
+
+[tool.setuptools]
+packages = ["py_electrodes"]
+
+[tool.setuptools.package-data]
+py_electrodes = [
+    "Settings.txt",
+    "resources/*",
+    "examples/*",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py37", "py38", "py39", "py310", "py311"]
+skip-string-normalization = true
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "--tb=short"

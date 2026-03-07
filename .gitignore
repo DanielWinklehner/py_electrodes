@@ -109,3 +109,10 @@ condaenv*
 
 # Cython
 *.c
+/create_md.py
+/codebase.md
+/backup/
+/py_electrodes/examples/ray_intersection_example.png
+/py_electrodes/examples/collision_detection_example.png
+/py_electrodes/examples/boundary_conditions_example.png
+/py_electrodes/py_electrodes_occ.cpp

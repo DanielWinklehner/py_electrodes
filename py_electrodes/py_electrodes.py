@@ -129,13 +129,6 @@ except (ImportError, RuntimeError) as e:
         print(f"Warp not available: {e}")
 
 try:
-    import kaolin
-    HAVE_KAOLIN = True
-except ImportError:
-    if DEBUG:
-        print("Kaolin not available")
-
-try:
     import trimesh
     HAVE_TRIMESH = True
 except ImportError:
@@ -674,25 +667,22 @@ class PyElectrodeAssembly(object):
         return intersections
 
     def compute_surface_distances(self, mesh_nodes, exclude_electrode_id=None,
-                                  use_gpu=None):
+                                  use_gpu=None):  # Keep for API compatibility
         """
         Compute signed distance from mesh nodes to nearest electrode surface.
         For PIC field solvers with conductor boundaries.
 
+        Note: Distance calculation is CPU-only. Ray intersections (bottleneck) use GPU.
+
         Args:
             mesh_nodes: (N, 3) array of field grid points
             exclude_electrode_id: Optional - don't compute distance to this electrode
-            use_gpu: None (auto-detect), True (force GPU), False (force CPU)
+            use_gpu: Ignored (kept for API compatibility, always uses CPU)
 
         Returns:
             signed_distances: (N,) - negative inside, positive outside
             nearest_electrode_id: (N,) - which electrode is nearest
             nearest_surface_point: (N, 3) - closest point on any surface
-
-        Example:
-            > assembly = PyElectrodeAssembly("RFQ")
-            > mesh_pts = np.random.randn(10000, 3)
-            > dists, elec_ids, surf_pts = assembly.compute_surface_distances(mesh_pts)
         """
 
         N = len(mesh_nodes)
@@ -702,19 +692,23 @@ class PyElectrodeAssembly(object):
         nearest_electrode_id = np.full(N, -1, dtype=np.int32)
         nearest_surface_point = np.full((N, 3), np.nan, dtype=np.float32)
 
-        # Process each electrode
+        # Create mapping
+        electrode_id_map = {elec_id: idx for idx, elec_id in enumerate(self.electrodes.keys())}
+
+        # Process each electrode (CPU only)
         for elec_id, electrode in self._electrodes.items():
+            elec_idx = electrode_id_map[elec_id]
 
             if exclude_electrode_id is not None and elec_id == exclude_electrode_id:
                 continue
 
-            dist, pts = electrode.signed_distance_to_surface(mesh_nodes, use_gpu=use_gpu)
+            dist, pts = electrode.signed_distance_to_surface(mesh_nodes)
 
             # Update only where this electrode is closer
             closer = np.abs(dist) < np.abs(signed_distances)
 
             signed_distances[closer] = dist[closer]
-            nearest_electrode_id[closer] = elec_id
+            nearest_electrode_id[closer] = elec_idx
             nearest_surface_point[closer] = pts[closer]
 
         return signed_distances, nearest_electrode_id, nearest_surface_point
@@ -890,7 +884,8 @@ class PyElectrode(object):
 
             try:
                 result = subprocess.run(
-                    [GMSH_EXE, self._orig_file, "-2", "-clmax", brep_h, "-o", msh_fn, "-format", "msh2"],
+                    [GMSH_EXE, self._orig_file, "-2", "-clmax", brep_h,
+                     "-o", msh_fn, "-format", "msh2", "-log", log_fn],
                     capture_output=True,
                     text=True,
                     timeout=60
@@ -942,8 +937,11 @@ class PyElectrode(object):
 
             try:
 
+                print()
+
                 result = subprocess.run(
-                    [GMSH_EXE, self._orig_file, transform_fn, "-2", "-o", msh_fn, "-format", "msh2"],
+                    [GMSH_EXE, self._orig_file, transform_fn, "-2",
+                     "-o", msh_fn, "-format", "msh2", "-log", log_fn],
                     capture_output=True,
                     text=True,
                     timeout=60
@@ -1722,47 +1720,29 @@ class PyElectrode(object):
             logger.warning(f"GPU segment intersection failed: {e}. Falling back to CPU.")
             return self._segment_intersects_cpu(point_start, point_end)
 
-
     def signed_distance_to_surface(self, points, use_gpu=None):
         """
         Compute signed distance from points to electrode surface.
         Negative = inside, Positive = outside
 
+        Note: Distance calculation is CPU-only. GPU is used for ray intersection
+        collision detection, which is the performance bottleneck.
+
         Args:
             points: (N, 3) array of query points
-            use_gpu: None (auto-detect), True (force GPU), False (force CPU)
+            use_gpu: Ignored (kept for API compatibility)
 
         Returns:
             signed_distances: (N,) array, negative inside, positive outside
             nearest_points: (N, 3) closest surface points
-
-        Example:
-            > elec = PyElectrode("test")
-            > points = np.random.randn(1000, 3)
-            > dists, surf_pts = elec.signed_distance_to_surface(points)
         """
-
-        # Auto-detect if not specified
-        if use_gpu is None:
-            use_gpu = HAVE_KAOLIN
-
-        if use_gpu and not HAVE_KAOLIN:
-            warnings.warn(
-                "GPU requested but Kaolin not available. "
-                "Install with: pip install kaolin torch. "
-                "Falling back to CPU.",
-                RuntimeWarning
-            )
-            use_gpu = False
 
         points = np.asarray(points, dtype=np.float32)
         assert points.ndim == 2 and points.shape[1] == 3, \
             "points must be (N, 3) array"
 
-        if use_gpu:
-            return self._signed_distance_gpu(points)
-        else:
-            return self._signed_distance_cpu(points)
+        # Always use CPU for distance calculation
+        return self._signed_distance_cpu(points)
 
     def _signed_distance_cpu(self, points):
         """CPU implementation using trimesh proximity queries"""
@@ -1773,7 +1753,6 @@ class PyElectrode(object):
         closest_pts, distances, _ = trimesh.proximity.closest_point(mesh, points)
 
         # Determine if inside or outside using ray casting
-        # Cast rays in random directions and count intersections
         directions = np.random.randn(len(points), 3).astype(np.float32)
         directions = directions / np.linalg.norm(directions, axis=1, keepdims=True)
 
@@ -1787,56 +1766,6 @@ class PyElectrode(object):
         # Count intersections per ray
         intersection_count = np.bincount(index_ray, minlength=len(points))
         inside = (intersection_count % 2) == 1  # Odd = inside
-
-        # Apply sign
-        signed_distances = distances.copy()
-        signed_distances[inside] *= -1
-
-        return signed_distances.astype(np.float32), closest_pts.astype(np.float32)
-
-    def _signed_distance_gpu(self, points):
-        """GPU implementation using Kaolin"""
-
-        if not HAVE_KAOLIN:
-            raise RuntimeError("Kaolin not available")
-
-        import torch
-
-        mesh = self._get_trimesh()
-
-        # Convert to torch tensors
-        vertices = torch.from_numpy(mesh.vertices).float().cuda()
-        faces = torch.from_numpy(mesh.faces).long().cuda()
-        points_torch = torch.from_numpy(points).float().cuda()
-
-        try:
-            # Use Kaolin's point-to-mesh distance
-            distances, closest_indices = kaolin.metrics.pointcloud.point_to_mesh_distance(
-                points_torch.unsqueeze(0),
-                vertices.unsqueeze(0),
-                faces
-            )
-            distances = distances.squeeze(0).cpu().numpy()
-        except Exception as e:
-            logger.warning(f"Kaolin distance computation failed: {e}. Using CPU fallback.")
-            return self._signed_distance_cpu(points)
-
-        # Get closest surface points
-        closest_indices = closest_indices.cpu().numpy().flatten()
-        closest_pts = mesh.vertices[closest_indices]
-
-        # Inside/outside test via ray casting (CPU for now)
-        directions = np.random.randn(len(points), 3).astype(np.float32)
-        directions = directions / np.linalg.norm(directions, axis=1, keepdims=True)
-
-        _, index_ray, _ = mesh.ray.intersects_location(
-            ray_origins=points,
-            ray_directions=directions,
-            multiple_hits=True
-        )
-
-        intersection_count = np.bincount(index_ray, minlength=len(points))
-        inside = (intersection_count % 2) == 1
 
         # Apply sign
         signed_distances = distances.copy()

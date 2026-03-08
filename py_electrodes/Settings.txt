@@ -1,6 +1,6 @@
 DEBUG::True
 DECIMALS::12
 TEMP_DIR::temp
-GMSH_EXE::C:\Users\Daniel\anaconda3\envs\py_elec_env\Library\bin\gmsh.exe
+GMSH_EXE::C:\Users\Daniel\anaconda3\envs\accel-dev-env\Library\bin\gmsh.exe
 OCC_GRADIENT1::[175, 210, 255]
 OCC_GRADIENT2::[255, 255, 255]

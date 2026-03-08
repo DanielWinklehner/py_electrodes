@@ -116,3 +116,4 @@ condaenv*
 /py_electrodes/examples/collision_detection_example.png
 /py_electrodes/examples/boundary_conditions_example.png
 /py_electrodes/py_electrodes_occ.cpp
+/py_electrodes/resources/gmsh-4.4.1-Windows64/

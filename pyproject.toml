@@ -32,7 +32,6 @@ dependencies = [
 # GPU acceleration (optional, requires NVIDIA GPU + CUDA)
 gpu = [
     "warp-lang>=0.10.0",
-    "kaolin>=0.15.0",
     "torch>=2.0.0",
 ]
 

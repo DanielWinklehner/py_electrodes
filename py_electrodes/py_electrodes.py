@@ -31,14 +31,13 @@ settings = SettingsHandler()
 DEBUG = (settings["DEBUG"] == "True")
 DECIMALS = float(settings["DECIMALS"])
 GMSH_EXE = settings["GMSH_EXE"]
-# TEMP_DIR = settings["TEMP_DIR"]
+DEBUG_OUTPUT_DIR = settings["DEBUG_DIR"]
 OCC_GRADIENT1 = [int(item) for item in settings["OCC_GRADIENT1"].split("]")[0].split("[")[1].split(",")]
 OCC_GRADIENT2 = [int(item) for item in settings["OCC_GRADIENT2"].split("]")[0].split("[")[1].split(",")]
 
-# Temporary directory for saving intermittent files
-# if os.path.exists(TEMP_DIR):
-#     shutil.rmtree(TEMP_DIR)
-# os.mkdir(TEMP_DIR)
+# Debug output directory (persists after program completion)
+if DEBUG and not os.path.exists(DEBUG_OUTPUT_DIR):
+    os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
 
 # Define the axis directions and vane rotations:
 X = 0
@@ -393,91 +392,73 @@ class PyElectrodeAssembly(object):
 
             return _elecs
 
-    def get_bempp_mesh(self, brep_h=0.005):
 
-        if not HAVE_BEMPP and not HAVE_MESHIO:
-            print("It looks like we can't find BEMPP or meshio. Aborting!")
+    def get_bempp_mesh(self, brep_h=0.005):
+        """Assemble full bempp mesh from electrode meshes (in-memory)"""
+
+        if not HAVE_BEMPP:
+            print("BEMPP not found. Aborting!")
             return 1
 
-        # TODO: Can this be expedited using cython or multiple cores? -DW
         if RANK == 0:
+            # Collect existing bempp_domain assignments
+            existing_domains = [e.bempp_domain for e in self._electrodes.values()
+                                if e.bempp_domain is not None]
 
-            # Initialize empty arrays of the correct shape (3 x n)
+            # Start domain counter after max existing domain (avoid collisions)
+            domain_counter = max(existing_domains) + 1 if existing_domains else 1
+
+            # Initialize empty arrays
             vertices = np.zeros([3, 0])
             elements = np.zeros([3, 0])
             vertex_counter = 0
-            domain_counter = 1
             domains = np.zeros([0], int)
 
-            # Domains will just be counted through from 1 to max
+            # Assemble all electrode meshes
             for _id, _electrode in self._electrodes.items():
 
-                # Check whether there is a individual mesh for this electrode already
-                # if not: generate it with gmsh
-                if _electrode.gmsh_file is None:
+                # Generate mesh if not already done
+                if _electrode._gmsh_msh is None:
                     _electrode.generate_mesh(brep_h=brep_h)
 
-                if HAVE_MESHIO:
-                    # Note: This is only the 2D mesh.
-                    mesh = meshio.read(_electrode.gmsh_file)
-                    # cell_data_tri = mesh.cell_data["triangle"]
+                # Extract from in-memory mesh
+                _vertices = _electrode._gmsh_msh['vertices'].T  # (3, N)
+                _elements = _electrode._gmsh_msh['elements'].T  # (3, M)
 
-                    _vertices = mesh.points.T
-                    # _elements = mesh.cells["triangle"].T
-                    for cellblock in mesh.cells:
-                        if cellblock.type == "triangle":
-                            _elements = cellblock.data.T
-
-                    # _domain_ids = np.ones(len(cell_data_tri["gmsh:physical"]), int) * domain_counter
-                    # _domain_ids = np.ones(len(mesh.cell_data["gmsh:physical"]), int) * domain_counter
-                    # TODO: This seems dangerous for mixed cases where some electrodes have a bempp domain -DW
-                    dom_idx = _electrode.bempp_domain if _electrode.bempp_domain is not None else domain_counter
-                    _domain_ids = np.ones(_elements.shape[1], int) * dom_idx
-
-                    vertices = np.concatenate((vertices, _vertices), axis=1)
-                    elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
-                    domains = np.concatenate((domains, _domain_ids), axis=0)
-
-                    _electrode.bempp_domain = dom_idx  # Override if simple enumeration was used
-
-                    vertex_counter += _vertices.shape[1]
+                # Determine domain index (respect pre-assigned domains)
+                if _electrode.bempp_domain is not None:
+                    dom_idx = _electrode.bempp_domain
+                else:
+                    dom_idx = domain_counter
                     domain_counter += 1
 
-                # elif HAVE_BEMPP:
-                #     print("_electrode.gmsh_file", _electrode.gmsh_file)
-                #     mesh = bempp_cl.api.import_grid(_electrode.gmsh_file)
-                #
-                #     _vertices = mesh.leaf_view.vertices
-                #     _elements = mesh.leaf_view.elements
-                #     _domain_ids = np.ones(len(mesh.leaf_view.domain_indices), int) * domain_counter
-                #
-                #     vertices = np.concatenate((vertices, _vertices), axis=1)
-                #     elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
-                #     domains = np.concatenate((domains, _domain_ids), axis=0)
-                #
-                #     # set current domain index in electrode object
-                #     _electrode.bempp_domain = domain_counter
-                #
-                #     # Increase the running counters
-                #     vertex_counter += _vertices.shape[1]
-                #     domain_counter += 1
+                _domain_ids = np.ones(_elements.shape[1], int) * dom_idx
 
-            self._full_mesh = {"verts": vertices,
-                               "elems": elements,
-                               "domns": domains}
+                # Concatenate
+                vertices = np.concatenate((vertices, _vertices), axis=1)
+                elements = np.concatenate((elements, _elements + vertex_counter), axis=1)
+                domains = np.concatenate((domains, _domain_ids), axis=0)
 
-            # Apply assembly global transformation here
-            vertices = self._transformation.apply_to_points(vertices.T).T
+                # Update electrode's domain
+                _electrode.bempp_domain = dom_idx
+                vertex_counter += _vertices.shape[1]
+
+            self._full_mesh = {
+                "verts": vertices,
+                "elems": elements,
+                "domns": domains
+            }
+
+            # Apply assembly global transformation
+            vertices_transformed = self._transformation.apply_to_points(vertices.T).T
+            self._full_mesh["verts"] = vertices_transformed
 
             if DEBUG:
-                if HAVE_BEMPP:
-                    bempp_cl.api.PLOT_BACKEND = "gmsh"
-                    BemppGrid(vertices, elements, domains).plot()
+                bempp_cl.api.PLOT_BACKEND = "gmsh"
+                BemppGrid(vertices_transformed, elements, domains).plot()
 
         if MPI is not None:
-            # Broadcast results to all nodes
             self._full_mesh = COMM.bcast(self._full_mesh, root=0)
-
             COMM.barrier()
 
         return self._full_mesh
@@ -775,6 +756,7 @@ class PyElectrode(object):
         self._geo_file = None
         self._stl_file = None
         self._gmsh_file = None
+        self._gmsh_msh = None
         self._occ_obj = None
         self._bempp_domain = None
 
@@ -858,135 +840,101 @@ class PyElectrode(object):
         return 0
 
     def generate_mesh(self, brep_h=0.005):
+        """Generate 2D surface mesh using gmsh Python API"""
 
         if self._orig_file is None:
             print("No geometry loaded yet!")
             return 1
 
-        msh_fn = os.path.join(TEMP_DIR, "{}.msh".format(self._id))
-        log_fn = os.path.join(TEMP_DIR, "{}_gmsh.log".format(self._id))
+        import gmsh
 
-        # For now, we need to save in msh2 format for BEMPP compability
-        # gmsh can handle geo, brep and stl the same way. However, brep has no mesh resolution
-        # information. STL is already a mesh...
+        try:
+            # Initialize gmsh
+            gmsh.initialize()
 
-        # Create a string that contains the transformations
-        # TODO: may have to add the mesh size in again.
-        # TODO: What about the reverse mesh thing?
-        # TODO: This is assuming the user has defined a volume in geo string or geo file...
-        if self._originated_from == "brep":
+            # Open geometry
+            gmsh.open(self._orig_file)
+            gmsh.model.occ.synchronize()
 
-            # command = "{} \"{}\" -2 -clmax {} -o \"{}\" -format msh2 -log {}".format(GMSH_EXE,
-            #                                                                          self._orig_file,
-            #                                                                          brep_h,
-            #                                                                          msh_fn,
-            #                                                                          log_fn)
-
-            try:
-                result = subprocess.run(
-                    [GMSH_EXE, self._orig_file, "-2", "-clmax", brep_h,
-                     "-o", msh_fn, "-format", "msh2", "-log", log_fn],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-
-                gmsh_success = result.returncode
-
-                if result.returncode != 0:
-                    self._debug_message(f"gmsh stderr: {result.stderr}")
-
-            except subprocess.TimeoutExpired:
-                self._debug_message("gmsh timed out after 60 seconds")
-                gmsh_success = 1
-
-            except Exception as e:
-                self._debug_message(f"Error running gmsh: {e}")
-                gmsh_success = 1
-
-        elif self._originated_from in ["geo_str", "geo_file"]:
-
-            tx, ty, tz = self._transformation.translation
+            # Get rotation (quaternion to angle-axis)
             v_rot = quaternion.as_rotation_vector(self._transformation.rotation)
-            angle = np.sqrt(np.sum(np.dot(v_rot, v_rot)))
+            angle = np.linalg.norm(v_rot)
 
-            omit_t = omit_r = ""
+            # Apply rotation if non-negligible
+            if angle > 1.0 / DECIMALS:
+                axis = v_rot / angle
+                origin = [0.0, 0.0, 0.0]
 
-            if np.abs(tx) + np.abs(ty) + np.abs(tz) < 1 / DECIMALS:
-                # no translation... omit in geo file
-                omit_t = "//"
+                gmsh.model.occ.rotate(gmsh.model.getEntities(),
+                                      origin[0], origin[1], origin[2],
+                                      axis[0], axis[1], axis[2], angle)
 
-            if np.abs(angle) <= 1 / DECIMALS:
-                # no rotation... omit in geo file
-                omit_r = "//"
+            # Apply translation
+            tx, ty, tz = self._transformation.translation
+            if np.abs(tx) + np.abs(ty) + np.abs(tz) > 1.0 / DECIMALS:
 
-            transform_str = """v() = Volume "*";
-{}Rotate {{ {{ {}, {}, {} }}, {{ 0, 0, 0 }}, {} }} {{  Volume{{v()}}; }}
-{}Translate {{ {}, {}, {} }} {{ Volume{{v()}}; }}
-""".format(omit_r, v_rot[0], v_rot[1], v_rot[2], angle, omit_t, tx, ty, tz)
+                if DEBUG:
+                    print(f"Applying translation {tx}, {ty}, {tz} to electrode {self.name}")
 
-            transform_fn = os.path.join(TEMP_DIR, "{}_trafo.geo".format(self._id))
-            with open(transform_fn, "w") as _of:
-                _of.write(transform_str)
+                gmsh.model.occ.translate(gmsh.model.getEntities(), tx, ty, tz)
 
-            # command = "{} \"{}\" \"{}\" -2 -o \"{}\" -format msh2 -log {}".format(GMSH_EXE,
-            #                                                                       self._orig_file,
-            #                                                                       transform_fn,
-            #                                                                       msh_fn,
-            #                                                                       log_fn)
+            gmsh.model.occ.synchronize()
 
+            # Note: geo files have mesh size information, brep does not
+            if self._originated_from == "brep":
+                gmsh.model.mesh.setSize(gmsh.model.getEntities(2), brep_h)
+            gmsh.model.mesh.generate(2)
+
+            # Extract mesh data
+            node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
+            elem_types, elem_tags, elem_connectivity = gmsh.model.mesh.getElements(dim=2)
+
+            # Reshape data
+            vertices = node_coords.reshape(-1, 3).astype(np.float32)
+
+            # Handle multiple element types (should be just triangles, but be safe)
+            all_elements = []
+            all_tags = []
+            for elem_type, elem_tag, elem_conn in zip(elem_types, elem_tags, elem_connectivity):
+                # Connectivity is flat, reshape to (n_elements, nodes_per_element)
+                n_elems = len(elem_tag)
+                nodes_per_elem = len(elem_conn) // n_elems
+                elements = elem_conn.reshape(n_elems, nodes_per_elem)
+
+                # Convert to 0-indexed
+                elements = elements - 1
+                all_elements.append(elements)
+                all_tags.append(elem_tag)
+
+            # Concatenate all elements
+            elements = np.vstack(all_elements).astype(np.int32)
+            element_tags = np.hstack(all_tags).astype(np.int32)
+
+            # Store in memory
+            self._gmsh_msh = {
+                'vertices': vertices,
+                'elements': elements,
+                'element_tags': element_tags,
+            }
+
+            self._debug_message(f"Mesh generated: {len(vertices)} vertices, {len(elements)} elements")
+
+            # Save .msh file if debugging
+            if DEBUG:
+                self._gmsh_file = os.path.join(DEBUG_OUTPUT_DIR, "{}.msh".format(self._id))
+                gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+                gmsh.write(self._gmsh_file)
+                self._debug_message(f"Mesh saved to {self._gmsh_file} (debug mode)")
+
+        except Exception as e:
+            self._debug_message(f"gmsh error: {e}")
+            return 1
+
+        finally:
             try:
-
-                print()
-
-                result = subprocess.run(
-                    [GMSH_EXE, self._orig_file, transform_fn, "-2",
-                     "-o", msh_fn, "-format", "msh2", "-log", log_fn],
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-
-                gmsh_success = result.returncode
-
-                if result.returncode != 0:
-                    self._debug_message(f"gmsh stderr: {result.stderr}")
-
-            except subprocess.TimeoutExpired:
-                self._debug_message("gmsh timed out after 60 seconds")
-                gmsh_success = 1
-
-            except Exception as e:
-                self._debug_message(f"Error running gmsh: {e}")
-                gmsh_success = 1
-
-
-        elif self._originated_from == "stl":
-            print("Meshing with transformations from stl not yet implemented")
-            return 1
-        else:
-            print("Format not supported for meshing!")
-            return 1
-
-        # sys.stdout.flush()
-        # gmsh_success = os.system(command)
-
-        if gmsh_success != 0:
-
-            # Catch error messages related to transfinite algorithm (mesh will still be produced)
-            with open(log_fn, 'r') as infile:
-                lines = infile.readlines()
-
-            ignore_error = True
-            for line in lines:
-                if "Error" in line and "cannot be meshed using the transfinite algo" not in line:
-                    ignore_error = False
-
-            if not ignore_error:
-                self._debug_message("Something went wrong with gmsh, log file was saved in {}".format(TEMP_DIR))
-                return 1
-
-        self._gmsh_file = msh_fn
+                gmsh.finalize()
+            except:
+                pass
 
         return 0
 
@@ -1062,50 +1010,34 @@ class PyElectrode(object):
             return 0
 
     def _generate_from_geo(self):
-        self._debug_message("Generating from geo")
+        """Generate OCC object from .geo file using gmsh Python API"""
+        self._debug_message("Generating from geo (using gmsh API)")
+
+        import gmsh
 
         geo_fn = self._orig_file
         brep_fn = os.path.join(TEMP_DIR, "{}.brep".format(self._id))
-        sto_fn = os.path.join(TEMP_DIR, "{}_geo-to-brep.out".format(self._id))
-        err_fn = os.path.join(TEMP_DIR, "{}_geo-to-brep.err".format(self._id))
-
-        gmsh_success = 0
-
-        # Call gmsh to transform .geo file to .brep
-        # command = "\"{}\" \"{}\" -0 -o \"{}\" -format brep 1>{} 2>{}".format(GMSH_EXE,
-        #                                                                  geo_fn,
-        #                                                                  brep_fn,
-        #                                                                  sto_fn,
-        #                                                                  err_fn)
-        #
-        # self._debug_message("Running", command)
-        # gmsh_success += os.system(command)
-        #
-        # if gmsh_success != 0:
-        #     self._debug_message("Something went wrong with gmsh, output and error was saved in {}".format(TEMP_DIR))
-        #     return 1
 
         try:
-            result = subprocess.run(
-                [GMSH_EXE, geo_fn, "-0", "-o", brep_fn, "-format", "brep"],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
+            gmsh.initialize()
+            gmsh.open(geo_fn)
+            gmsh.model.geo.synchronize()
+            gmsh.write(brep_fn)
 
-            gmsh_success += result.returncode
-
-            if result.returncode != 0:
-                self._debug_message(f"gmsh stderr: {result.stderr}")
-
-        except subprocess.TimeoutExpired:
-            self._debug_message("gmsh timed out after 60 seconds")
-            gmsh_success += 1
+            self._debug_message(f"BREP written to {brep_fn}")
 
         except Exception as e:
-            self._debug_message(f"Error running gmsh: {e}")
-            gmsh_success += 1
+            self._debug_message(f"gmsh error: {e}")
+            return 1
 
+        finally:
+            # Ensure gmsh is finalized
+            try:
+                gmsh.finalize()
+            except:
+                pass
+
+        # Now load the BREP file with OCC (existing code)
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
         self._occ_obj.translation = self._transformation.translation
         self._occ_obj.rotation = self._transformation.rotation

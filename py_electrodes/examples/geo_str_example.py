@@ -20,3 +20,5 @@ if __name__ == '__main__':
     pe = PyElectrode("Brep Electrode")
     pe.generate_from_geo_str(geo_str)
     pe.show()
+
+    pe.generate_mesh()

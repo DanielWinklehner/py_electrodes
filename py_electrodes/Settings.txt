@@ -1,7 +1,7 @@
-DEBUG::True
+DEBUG::False
 DECIMALS::12
 TEMP_DIR::temp
 DEBUG_DIR::debug_output
-GMSH_EXE::C:\Users\Daniel\anaconda3\envs\accel-dev-env2\Library\bin\gmsh.exe
+GMSH_EXE::<path-to-gmsh-incl-executable>
 OCC_GRADIENT1::[175, 210, 255]
 OCC_GRADIENT2::[255, 255, 255]

@@ -585,7 +585,7 @@ class PyElectrodeAssembly(object):
     def compute_axis_aligned_surface_intersections(self, mesh_nodes, axes='all',
                                                    use_gpu=None, chunk_size=None):
         """
-        Compute ray-surface intersections for mesh nodes in cardinal directions.
+        Compute ray-surface intersections for N mesh nodes in cardinal directions.
 
         Returns:
             intersections: dict {

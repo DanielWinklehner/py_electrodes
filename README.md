@@ -1,7 +1,7 @@
 # py_electrodes
 classes and methods for creating electrode objects (solids with a voltage applied) using 
 [gmsh](https://gmsh.info/) 
-and [pythonocc-core](https://github.com/tpaviot/pythonocc-core). 
+and [pythonocc-core](https://github.com/tpaviot/pythonocc-core). Including fast methods to find segment/ray - triangle/boundary intersections. 
 
 ## The Settings.txt file
 During installation a Settings.txt file is created in
@@ -24,22 +24,42 @@ _$HOME/.local/py_electrodes/Settings.txt_
 The settings handler wil look in those directories first and in the package path 
 second.
 
-## Setting up the Anaconda3 environment
+## Setting up the Anaconda3 environment (tested in Windows 11 and WSL2/Ubuntu 22.04)
 
-With the new version of 
-[Open Cascade](https://www.opencascade.com/) and 
-[pythonocc-core](https://github.com/tpaviot/pythonocc-core) (7.4.0), a simple 
-anaconda installation from yml file is possible. The file _environment.yml_ 
-can be found in _py_electrodes/documents/_. 
+The simplest setup is using conda (Anaconda3-tested) The file _conda-env.yml_ 
+can be found in /PyPATools/documents.
 
-simply create a new Anaconda3 environment from the Navigator (Environments-->Import)
+Simply create a new Anaconda3 environment from the Navigator (Environments-->Import)
 or from the command line
 
 ```bash
-conda env create -f environment.yml
+conda env create -f conda-env.yml
 ```
 
-The environment name can be changed in the yml file or with the _-name_ flag.
+The environment name can be changed in the yml file or with the _--name_ flag.
+
+### Install PyPATools
+
+_Note: there is a co-dependency between PyPATools and py_electrodes. Please install both for full functionality._
+
+Either:
+
+```bash
+git clone https://github.com/DanielWinklehner/PyPATools.git
+cd PyPATools
+pip install -e .
+
+git clone https://github.com/DanielWinklehner/py_electrodes.git
+cd py_electrodes
+pip install -e .
+```
+
+Or directly (if you don't need the source files and examples):
+
+```bash
+pip install git+https://github.com/DanielWinklehner/PyPATools.git
+pip install git+https://github.com/DanielWinklehner/py_electrodes.git
+```
 
 ### Additional notes for Windows
 

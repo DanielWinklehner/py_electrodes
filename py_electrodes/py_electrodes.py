@@ -292,6 +292,24 @@ class PyElectrodeAssembly(object):
             print("Can only set the full transformation as a CoordinateTransformation3D object! "
                   "Consider using set_translation(), set_rotation_angle_axis()")
 
+    def bounding_box(self):
+        """Get combined bounding box of all electrodes"""
+        bounds_list = [e.bounding_box() for e in self._electrodes.values()
+                       if e.bounding_box() is not None]
+
+        if not bounds_list:
+            return None
+
+        # Unpack and merge
+        xmins = [b[0] for b in bounds_list]
+        xmaxs = [b[1] for b in bounds_list]
+        ymins = [b[2] for b in bounds_list]
+        ymaxs = [b[3] for b in bounds_list]
+        zmins = [b[4] for b in bounds_list]
+        zmaxs = [b[5] for b in bounds_list]
+
+        return (min(xmins), max(xmaxs), min(ymins), max(ymaxs), min(zmins), max(zmaxs))
+
     def export(self, filename):
         # TODO: Add transformation! -DW
 
@@ -520,17 +538,16 @@ class PyElectrodeAssembly(object):
         return collision_data
 
     def ray_surface_intersection(self, ray_origins, ray_directions, use_gpu=None,
-                                 return_first_hit_only=True, chunk_size=None):
+                                 return_first_hit_only=False, chunk_size=None):
         """
         Batch ray-surface intersection across all electrodes.
 
         Returns:
             hit_data: dict {
-                'hit_mask': (N,) bool - which rays hit something,
-                'hit_points': (N, 3) - surface intersection points,
-                'distances': (N,) - distance to intersection,
-                'electrode_ids': (N,) - which electrode index (-1 if no hit),
-                'electrode_index_map': dict mapping int index to electrode UUID,
+                'hit_mask': (N,) bool,
+                'hit_points': list of (M_i, 3) arrays - ragged,
+                'distances': list of (M_i,) arrays - ragged,
+                'electrode_ids': list of (M_i,) arrays - electrode ID for each hit,
             }
         """
 
@@ -541,63 +558,66 @@ class PyElectrodeAssembly(object):
 
         hit_data = {
             'hit_mask': np.zeros(N, dtype=bool),
-            'hit_points': np.full((N, 3), np.nan, dtype=np.float32),
-            'distances': np.full(N, np.inf, dtype=np.float32),
-            'electrode_ids': np.full(N, -1, dtype=np.int32),
-            'electrode_index_map': {},
+            'hit_points': [np.empty((0, 3)) for _ in range(N)],
+            'distances': [np.array([]) for _ in range(N)],
+            'electrode_ids': [np.array([], dtype=np.int32) for _ in range(N)],
         }
 
-        # Create mapping of electrode ID (UUID) to integer index
+        # Create electrode ID mapping
         electrode_id_map = {elec_id: idx for idx, elec_id in enumerate(self.electrodes.keys())}
-        hit_data['electrode_index_map'] = {v: k for k, v in electrode_id_map.items()}
 
         # Process each electrode
         for elec_id, electrode in self._electrodes.items():
-            elec_idx = electrode_id_map[elec_id]  # Get integer index
+            elec_idx = electrode_id_map[elec_id]
 
-            # Process in chunks
             for i in range(0, N, chunk_size):
                 end_idx = min(i + chunk_size, N)
                 chunk_origins = ray_origins[i:end_idx]
                 chunk_dirs = ray_directions[i:end_idx]
 
                 hit_mask, hit_pts, dists = electrode.ray_surface_intersection(
-                    chunk_origins, chunk_dirs, use_gpu=use_gpu
+                    chunk_origins, chunk_dirs, use_gpu=use_gpu,
+                    return_first_hit_only=return_first_hit_only
                 )
 
-                if return_first_hit_only:
-                    # Only update if this is closer than previous hits
-                    is_closer = hit_mask & (dists < hit_data['distances'][i:end_idx])
+                # Append all hits from this electrode
+                for local_idx, ray_hit in enumerate(hit_mask):
+                    global_idx = i + local_idx
 
-                    hit_data['hit_mask'][i:end_idx][is_closer] = True
-                    hit_data['hit_points'][i:end_idx][is_closer] = hit_pts[is_closer]
-                    hit_data['distances'][i:end_idx][is_closer] = dists[is_closer]
-                    hit_data['electrode_ids'][i:end_idx][is_closer] = elec_idx  # Use integer index
-                else:
-                    # Record all hits (could have multiple per ray)
-                    hit_data['hit_mask'][i:end_idx] |= hit_mask
-                    hit_data['hit_points'][i:end_idx][hit_mask] = hit_pts[hit_mask]
-                    hit_data['distances'][i:end_idx][hit_mask] = dists[hit_mask]
-                    hit_data['electrode_ids'][i:end_idx][hit_mask] = elec_idx  # Use integer index
+                    if ray_hit:
+                        hit_data['hit_mask'][global_idx] = True
+                        hit_data['hit_points'][global_idx] = np.vstack([
+                            hit_data['hit_points'][global_idx],
+                            hit_pts[local_idx]
+                        ])
+                        hit_data['distances'][global_idx] = np.hstack([
+                            hit_data['distances'][global_idx],
+                            dists[local_idx]
+                        ])
+                        hit_data['electrode_ids'][global_idx] = np.hstack([
+                            hit_data['electrode_ids'][global_idx],
+                            np.full(len(dists[local_idx]), elec_idx, dtype=np.int32)
+                        ])
 
         return hit_data
 
     def compute_axis_aligned_surface_intersections(self, mesh_nodes, axes='all',
                                                    use_gpu=None, chunk_size=None):
         """
-        Compute ray-surface intersections for N mesh nodes in cardinal directions.
+        Compute ray-surface intersections for mesh nodes in all cardinal directions.
+        Returns ALL intersections per ray (not just first).
 
         Returns:
-            intersections: dict {
-                'x+': {'hit_mask': (N,), 'hit_points': (N, 3), 'distances': (N,)},
-                'x-': {...},
-                'y+': {...},
-                'y-': {...},
-                'z+': {...},
-                'z-': {...},
-                'electrode_ids': (N, 6) - electrode index for each direction (-1 if no hit),
-                'electrode_index_map': dict mapping int index to electrode UUID,
-            }
+            intersections: list of dicts, one per mesh node, structured as:
+                [
+                    {  # Node 0
+                        'x+': {electrode_id_1: {...}, electrode_id_2: {...}},
+                        'x-': {electrode_id_3: {...}},
+                        'y+': {...},
+                        ...
+                    },
+                    {...},  # Node 1
+                ]
         """
 
         if axes == 'all':
@@ -609,41 +629,48 @@ class PyElectrodeAssembly(object):
 
         N = len(mesh_nodes)
 
-        # Create mapping
+        # Initialize result: list of dicts, one per node
+        intersections = [{} for _ in range(N)]
+
+        # Create electrode ID mapping
         electrode_id_map = {elec_id: idx for idx, elec_id in enumerate(self.electrodes.keys())}
 
-        intersections = {
-            'electrode_ids': np.full((N, len(axes)), -1, dtype=np.int32),
-            'electrode_index_map': {v: k for k, v in electrode_id_map.items()},
-        }
-
-        for ax_idx, axis_name in enumerate(axes):
+        # Process each direction
+        for axis_name in axes:
             if axis_name not in AXIS_DIRECTIONS:
-                raise ValueError(
-                    f"Unknown axis: {axis_name}. Must be one of {list(AXIS_DIRECTIONS.keys())}"
-                )
+                raise ValueError(f"Unknown axis: {axis_name}")
 
             ray_direction = AXIS_DIRECTIONS[axis_name]
 
             # Create ray directions for all mesh nodes
             ray_directions = np.tile(ray_direction, (N, 1)).astype(np.float32)
 
-            # Get intersections in this direction
+            # Get intersections in this direction (all hits, not first only)
             hit_data = self.ray_surface_intersection(
                 mesh_nodes, ray_directions,
                 use_gpu=use_gpu,
-                return_first_hit_only=True,
+                return_first_hit_only=False,
                 chunk_size=chunk_size
             )
 
-            # Store results
-            intersections[axis_name] = {
-                'hit_mask': hit_data['hit_mask'],
-                'hit_points': hit_data['hit_points'],
-                'distances': hit_data['distances'],
-            }
+            # Populate intersections structure
+            for node_idx in range(N):
+                intersections[node_idx][axis_name] = {}
 
-            intersections['electrode_ids'][:, ax_idx] = hit_data['electrode_ids']
+                # For each hit on this ray
+                if hit_data['hit_mask'][node_idx]:
+                    electrode_ids = hit_data['electrode_ids'][node_idx]
+                    distances = hit_data['distances'][node_idx]
+                    points = hit_data['hit_points'][node_idx]
+
+                    # Group by electrode
+                    for elec_idx in np.unique(electrode_ids):
+                        mask = electrode_ids == elec_idx
+
+                        intersections[node_idx][axis_name][elec_idx] = {
+                            'distances': distances[mask],
+                            'points': points[mask],
+                        }
 
         return intersections
 
@@ -818,6 +845,12 @@ class PyElectrode(object):
         else:
             print("Can only set the full transformation as a CoordinateTransformation3D object! "
                   "Consider using set_translation(), set_rotation_angle_axis()")
+
+    def bounding_box(self):
+        """Get bounding box of electrode from OCC object"""
+        if self._occ_obj is None:
+            return None
+        return self._occ_obj.get_bounds()  # Returns (xmin, xmax, ymin, ymax, zmin, zmax)
 
     def set_translation(self, translation, absolute=True):
 
@@ -1099,7 +1132,7 @@ class PyElectrode(object):
         return self._trimesh_cache
 
     def ray_surface_intersection(self, ray_origins, ray_directions, use_gpu=None,
-                                 max_distance=None):
+                                 return_first_hit_only=False):
         """
         Find surface intersection for arbitrary rays.
 
@@ -1107,7 +1140,6 @@ class PyElectrode(object):
             ray_origins: (N, 3) array of ray starting points
             ray_directions: (N, 3) array of ray directions (should be normalized)
             use_gpu: None (auto-detect), True (force GPU), False (force CPU)
-            max_distance: Optional - only return intersections within this distance
 
         Returns:
             hit_mask: (N,) boolean - True if ray hits surface
@@ -1149,14 +1181,15 @@ class PyElectrode(object):
 
         if use_gpu:
             return self._ray_surface_intersection_gpu(
-                ray_origins, ray_directions, max_distance
+                ray_origins, ray_directions, return_first_hit_only
             )
         else:
             return self._ray_surface_intersection_cpu(
-                ray_origins, ray_directions, max_distance
+                ray_origins, ray_directions, return_first_hit_only
             )
 
-    def _ray_surface_intersection_cpu(self, ray_origins, ray_directions, max_distance=None):
+    def _ray_surface_intersection_cpu(self, ray_origins, ray_directions,
+                                      return_first_hit_only=False):
         """CPU implementation using trimesh ray casting"""
 
         mesh = self._get_trimesh()
@@ -1165,7 +1198,7 @@ class PyElectrode(object):
         locations, index_ray, index_tri = mesh.ray.intersects_location(
             ray_origins=ray_origins,
             ray_directions=ray_directions,
-            multiple_hits=False  # Single first hit per ray
+            multiple_hits=not return_first_hit_only  # Single first hit per ray
         )
 
         # Initialize output arrays
@@ -1174,23 +1207,28 @@ class PyElectrode(object):
         hit_points = np.full((N, 3), np.nan, dtype=np.float32)
         distances = np.full(N, np.inf, dtype=np.float32)
 
-        # Process each intersection
+        # Process each intersection (can be multiple per ray)
+        hit_mask = np.zeros(N, dtype=bool)
+        hit_points_list = [[] for _ in range(N)]  # Ragged lists
+        hit_distances_list = [[] for _ in range(N)]
+
         for i, loc in enumerate(locations):
             ray_idx = index_ray[i]
             dist_to_hit = np.linalg.norm(loc - ray_origins[ray_idx])
 
-            # Check distance limit if specified
-            if max_distance is not None and dist_to_hit > max_distance:
-                continue
-
             hit_mask[ray_idx] = True
-            hit_points[ray_idx] = loc.astype(np.float32)
-            distances[ray_idx] = dist_to_hit
+            hit_points_list[ray_idx].append(loc)
+            hit_distances_list[ray_idx].append(dist_to_hit)
 
-        return hit_mask, hit_points, distances
+        # Convert to arrays
+        hit_points = [np.array(pts) if pts else np.empty((0, 3)) for pts in hit_points_list]
+        hit_distances = [np.array(dists) if dists else np.array([]) for dists in hit_distances_list]
 
-    def _ray_surface_intersection_gpu(self, ray_origins, ray_directions, max_distance=None):
-        """GPU implementation using NVIDIA Warp - simplified version"""
+        return hit_mask, hit_points, hit_distances
+
+    def _ray_surface_intersection_gpu(self, ray_origins, ray_directions,
+                                      return_first_hit_only=False):
+        """GPU implementation using NVIDIA Warp's BVH acceleration"""
 
         if not HAVE_WARP:
             raise RuntimeError("Warp not available")
@@ -1204,130 +1242,284 @@ class PyElectrode(object):
             ray_origins = np.asarray(ray_origins, dtype=np.float32)
             ray_directions = np.asarray(ray_directions, dtype=np.float32)
 
-            # Convert to Warp
-            vertices_wp = wp.from_numpy(vertices)
-            faces_wp = wp.from_numpy(faces.flatten())
+            N = len(ray_origins)
+            MAX_HITS_PER_RAY = 50
+
+            # 1. Build Warp BVH Mesh
+            vertices_wp = wp.array(vertices, dtype=wp.vec3f)
+            faces_wp = wp.array(faces.flatten(), dtype=wp.int32)
+            mesh_wp = wp.Mesh(points=vertices_wp, indices=faces_wp)
+
+            # 2. Convert ray arrays to Warp
             ray_origins_wp = wp.from_numpy(ray_origins)
             ray_directions_wp = wp.from_numpy(ray_directions)
 
-            N = len(ray_origins)
-            n_triangles = len(faces)
-
-            # CORRECT: Initialize output arrays with proper types
-            hit_mask = wp.zeros(N, dtype=wp.uint8)
-            hit_points = wp.zeros(N, dtype=wp.vec3f)  # Array of vec3f, not (N,3) float32
-            hit_distances = wp.zeros(N, dtype=wp.float32)
-
-            max_dist = float(max_distance) if max_distance is not None else 1e30
+            # 3. Initialize output arrays (flattened)
+            hit_count = wp.zeros(N, dtype=wp.int32)
+            hit_distances = wp.zeros(N * MAX_HITS_PER_RAY, dtype=wp.float32)
+            hit_points = wp.zeros(N * MAX_HITS_PER_RAY, dtype=wp.vec3f)
 
             @wp.kernel
-            def ray_triangle_intersect(
+            def ray_mesh_intersect_bvh(
+                    mesh: wp.uint64,
                     origins: wp.array(dtype=wp.vec3f),
                     directions: wp.array(dtype=wp.vec3f),
-                    vertices: wp.array(dtype=wp.vec3f),
-                    faces: wp.array(dtype=wp.int32),
-                    n_tri: wp.int32,
-                    max_d: wp.float32,
-                    hits: wp.array(dtype=wp.uint8),
-                    points: wp.array(dtype=wp.vec3f),
+                    return_first: wp.bool,
+                    max_hits: wp.int32,
+                    counts: wp.array(dtype=wp.int32),
                     distances: wp.array(dtype=wp.float32),
+                    points: wp.array(dtype=wp.vec3f),
             ):
                 ray_id = wp.tid()
 
-                origin = origins[ray_id]
+                orig_origin = origins[ray_id]
                 direction = directions[ray_id]
 
-                closest_t = max_d
-                closest_point = wp.vec3f(0.0, 0.0, 0.0)
+                current_origin = orig_origin
+                accumulated_t = float(0.0)
+                hits_found = int(0)
 
-                # Check all triangles
-                for tri_id in range(n_tri):
-                    # Get vertex indices
-                    base = tri_id * 3
-                    v0_idx = faces[base]
-                    v1_idx = faces[base + 1]
-                    v2_idx = faces[base + 2]
+                # Loop to support multiple hits. Capped safely by max_hits.
+                for _ in range(max_hits):
+                    # Query the BVH tree (max distance 1e6)
+                    query = wp.mesh_query_ray(mesh, current_origin, direction, float(1e6))
 
-                    # Get vertices
-                    v0 = vertices[v0_idx]
-                    v1 = vertices[v1_idx]
-                    v2 = vertices[v2_idx]
+                    if not query.result:
+                        break  # Ray missed or exited the mesh entirely
 
-                    # Möller-Trumbore
-                    edge1 = v1 - v0
-                    edge2 = v2 - v0
-                    h = wp.cross(direction, edge2)
-                    a = wp.dot(edge1, h)
+                    # Calculate absolute intersection point from the ORIGINAL origin
+                    hit_t = accumulated_t + query.t
+                    hit_point = current_origin + direction * query.t
 
-                    if wp.abs(a) < 1e-7:
-                        continue
+                    # Store the hit
+                    linear_idx = ray_id * max_hits + hits_found
+                    distances[linear_idx] = hit_t
+                    points[linear_idx] = hit_point
 
-                    inv_a = 1.0 / a
-                    s = origin - v0
-                    u = wp.dot(s, h) * inv_a
+                    hits_found += 1
 
-                    if u < 0.0 or u > 1.0:
-                        continue
+                    if return_first:
+                        break
 
-                    q = wp.cross(s, edge1)
-                    v = wp.dot(direction, q) * inv_a
+                    # Advance the ray slightly past the current intersection to find the next one
+                    eps = float(1e-4)
+                    current_origin = hit_point + direction * eps
+                    accumulated_t = hit_t + eps
 
-                    if v < 0.0 or u + v > 1.0:
-                        continue
-
-                    t = wp.dot(edge2, q) * inv_a
-
-                    if t > 1e-6 and t < closest_t:
-                        closest_t = t
-                        closest_point = origin + direction * t
-
-                if closest_t < max_d:
-                    hits[ray_id] = wp.uint8(1)
-                    points[ray_id] = closest_point
-                    distances[ray_id] = closest_t
+                # Record the total number of valid hits for this ray
+                counts[ray_id] = hits_found
 
             # Launch kernel
             wp.launch(
-                ray_triangle_intersect,
+                ray_mesh_intersect_bvh,
                 dim=N,
                 inputs=[
+                    mesh_wp.id,  # Pass the BVH id
                     ray_origins_wp,
                     ray_directions_wp,
-                    vertices_wp,
-                    faces_wp,
-                    wp.int32(n_triangles),
-                    wp.float32(max_dist),
-                    hit_mask,
-                    hit_points,
+                    wp.bool(return_first_hit_only),
+                    wp.int32(MAX_HITS_PER_RAY),
+                    hit_count,
                     hit_distances,
+                    hit_points,
                 ]
             )
 
-            # Copy to numpy - FIXED: use helper function
-            hit_mask_raw = _warp_to_numpy(hit_mask)
+            # Ensure GPU finishes execution
+            wp.synchronize()
+
+            # Copy to numpy (preserving your custom helper function if it handles specific memory unmapping)
+            # If `_warp_to_numpy` is just `.numpy()`, you can directly use `hit_count.numpy()` instead
+            hit_count_np = _warp_to_numpy(hit_count)
+            hit_distances_raw = _warp_to_numpy(hit_distances)
             hit_points_raw = _warp_to_numpy(hit_points)
-            distances_raw = _warp_to_numpy(hit_distances)
 
-            hit_mask_np = hit_mask_raw.astype(bool)
-            distances_np = distances_raw.astype(np.float32)
+            # Build hit mask (which rays had any hits)
+            hit_mask = hit_count_np > 0
 
-            # Convert vec3f structs to (N, 3) float array
-            hit_points_np = np.zeros((N, 3), dtype=np.float32)
-            for i in range(N):
-                hit_points_np[i, 0] = hit_points_raw[i][0]
-                hit_points_np[i, 1] = hit_points_raw[i][1]
-                hit_points_np[i, 2] = hit_points_raw[i][2]
+            # Reshape flattened arrays back to (N, MAX_HITS_PER_RAY) for slicing
+            hit_distances_2d = hit_distances_raw.reshape((N, MAX_HITS_PER_RAY))
+            hit_points_2d = hit_points_raw.reshape((N, MAX_HITS_PER_RAY, 3))
 
-            # Mark misses
-            hit_points_np[~hit_mask_np] = np.nan
-            distances_np[~hit_mask_np] = np.inf
+            hit_distances_ragged = [
+                hit_distances_2d[i, :hit_count_np[i]].astype(np.float32)
+                for i in range(N)
+            ]
+            hit_points_ragged = [
+                hit_points_2d[i, :hit_count_np[i]].astype(np.float32)
+                for i in range(N)
+            ]
 
-            return hit_mask_np, hit_points_np, distances_np
+            return hit_mask, hit_points_ragged, hit_distances_ragged
 
         except Exception as e:
             logger.warning(f"GPU ray intersection failed: {e}. Falling back to CPU.")
-            return self._ray_surface_intersection_cpu(ray_origins, ray_directions, max_distance)
+            return self._ray_surface_intersection_cpu(
+                ray_origins, ray_directions, return_first_hit_only
+            )
 
+
+    # def _ray_surface_intersection_gpu(self, ray_origins, ray_directions,
+    #                                   return_first_hit_only=False):
+    #     """GPU implementation using NVIDIA Warp (supports multiple hits per ray)
+    #
+    #     TODO: Consider refactoring to triangle-centric parallelization:
+    #           Current: N GPU threads (rays), each loops M triangles sequentially
+    #           Better:  M GPU threads (triangles), each tests N rays in parallel
+    #           Rationale: For typical meshes M >> N, better GPU utilization despite atomic overhead
+    #     """
+    #
+    #     if not HAVE_WARP:
+    #         raise RuntimeError("Warp not available")
+    #
+    #     try:
+    #         mesh = self._get_trimesh()
+    #
+    #         # Ensure numpy arrays
+    #         vertices = np.asarray(mesh.vertices, dtype=np.float32)
+    #         faces = np.asarray(mesh.faces, dtype=np.int32)
+    #         ray_origins = np.asarray(ray_origins, dtype=np.float32)
+    #         ray_directions = np.asarray(ray_directions, dtype=np.float32)
+    #
+    #         # Convert to Warp
+    #         vertices_wp = wp.from_numpy(vertices)
+    #         faces_wp = wp.from_numpy(faces.flatten())
+    #         ray_origins_wp = wp.from_numpy(ray_origins)
+    #         ray_directions_wp = wp.from_numpy(ray_directions)
+    #
+    #         N = len(ray_origins)
+    #         n_triangles = len(faces)
+    #         MAX_HITS_PER_RAY = 50
+    #
+    #         # Initialize output arrays (flattened)
+    #         hit_count = wp.zeros(N, dtype=wp.int32)
+    #         hit_distances = wp.zeros(N * MAX_HITS_PER_RAY, dtype=wp.float32)
+    #         hit_points = wp.zeros(N * MAX_HITS_PER_RAY, dtype=wp.vec3f)
+    #
+    #         @wp.kernel
+    #         def ray_triangle_intersect(
+    #                 origins: wp.array(dtype=wp.vec3f),
+    #                 directions: wp.array(dtype=wp.vec3f),
+    #                 vertices: wp.array(dtype=wp.vec3f),
+    #                 faces: wp.array(dtype=wp.int32),
+    #                 n_tri: wp.int32,
+    #                 return_first: wp.bool,
+    #                 max_hits: wp.int32,
+    #                 counts: wp.array(dtype=wp.int32),
+    #                 distances: wp.array(dtype=wp.float32),
+    #                 points: wp.array(dtype=wp.vec3f),
+    #         ):
+    #             ray_id = wp.tid()
+    #
+    #             origin = origins[ray_id]
+    #             direction = directions[ray_id]
+    #
+    #             closest_t = float(1e30)
+    #             closest_point = wp.vec3f(0.0, 0.0, 0.0)
+    #
+    #             # Check all triangles
+    #             for tri_id in range(n_tri):
+    #                 # Get vertex indices
+    #                 base = tri_id * 3
+    #                 v0_idx = faces[base]
+    #                 v1_idx = faces[base + 1]
+    #                 v2_idx = faces[base + 2]
+    #
+    #                 # Get vertices
+    #                 v0 = vertices[v0_idx]
+    #                 v1 = vertices[v1_idx]
+    #                 v2 = vertices[v2_idx]
+    #
+    #                 # Möller-Trumbore
+    #                 edge1 = v1 - v0
+    #                 edge2 = v2 - v0
+    #                 h = wp.cross(direction, edge2)
+    #                 a = wp.dot(edge1, h)
+    #
+    #                 if wp.abs(a) < 1e-7:
+    #                     continue
+    #
+    #                 inv_a = 1.0 / a
+    #                 s = origin - v0
+    #                 u = wp.dot(s, h) * inv_a
+    #
+    #                 if u < 0.0 or u > 1.0:
+    #                     continue
+    #
+    #                 q = wp.cross(s, edge1)
+    #                 v = wp.dot(direction, q) * inv_a
+    #
+    #                 if v < 0.0 or u + v > 1.0:
+    #                     continue
+    #
+    #                 t = wp.dot(edge2, q) * inv_a
+    #
+    #                 if t > 1e-6:
+    #                     if return_first:
+    #                         # Only keep closest hit
+    #                         if t < closest_t:
+    #                             closest_t = t
+    #                             closest_point = origin + direction * t
+    #                     else:
+    #                         # Keep all hits
+    #                         hit_idx = wp.atomic_add(counts, ray_id, 1)
+    #                         linear_idx = ray_id * MAX_HITS_PER_RAY + hit_idx
+    #                         distances[linear_idx] = t
+    #                         points[linear_idx] = origin + direction * t
+    #
+    #             # If return_first_hit_only, store the closest hit
+    #             if return_first:
+    #                 counts[ray_id] = 1
+    #                 linear_idx = ray_id * MAX_HITS_PER_RAY
+    #                 distances[linear_idx] = closest_t
+    #                 points[linear_idx] = closest_point
+    #
+    #         # Launch kernel
+    #         wp.launch(
+    #             ray_triangle_intersect,
+    #             dim=N,
+    #             inputs=[
+    #                 ray_origins_wp,
+    #                 ray_directions_wp,
+    #                 vertices_wp,
+    #                 faces_wp,
+    #                 wp.int32(n_triangles),
+    #                 wp.bool(return_first_hit_only),
+    #                 wp.int32(MAX_HITS_PER_RAY),
+    #                 hit_count,
+    #                 hit_distances,
+    #                 hit_points,
+    #             ]
+    #         )
+    #
+    #         # Copy to numpy
+    #         hit_count_np = _warp_to_numpy(hit_count)
+    #         hit_distances_raw = _warp_to_numpy(hit_distances)
+    #         hit_points_raw = _warp_to_numpy(hit_points)
+    #
+    #         # Build hit mask (which rays had any hits)
+    #         hit_mask = hit_count_np > 0
+    #
+    #         # Reshape flattened arrays back to (N, MAX_HITS_PER_RAY) for slicing
+    #         hit_distances_2d = hit_distances_raw.reshape((N, MAX_HITS_PER_RAY))
+    #         hit_points_2d = hit_points_raw.reshape((N, MAX_HITS_PER_RAY, 3))
+    #
+    #         hit_distances_ragged = [
+    #             hit_distances_2d[i, :hit_count_np[i]].astype(np.float32)
+    #             for i in range(N)
+    #         ]
+    #         hit_points_ragged = [
+    #             hit_points_2d[i, :hit_count_np[i]].astype(np.float32)
+    #             for i in range(N)
+    #         ]
+    #
+    #         return hit_mask, hit_points_ragged, hit_distances_ragged
+    #
+    #     except Exception as e:
+    #         logger.warning(f"GPU ray intersection failed: {e}. Falling back to CPU.")
+    #         return self._ray_surface_intersection_cpu(
+    #             ray_origins, ray_directions, return_first_hit_only
+    #         )
 
 
     def _ray_mesh_intersect_kernel_gpu(self, ray_origins, ray_directions, max_distance=None):

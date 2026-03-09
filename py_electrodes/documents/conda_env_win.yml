@@ -1,0 +1,34 @@
+name: accel-dev-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python==3.12
+  - cupy
+  - cython
+  - gmsh
+  - python-gmsh
+  - h5py
+  - intel-opencl-rt
+  - intel-openmp
+  - matplotlib
+  - meshio
+  - mpi4py
+  - numba
+  - numpy
+  - occt
+  - pyopencl
+  - pythonocc-core
+  - rtree
+  - scipy
+  - trimesh
+  - pyamg
+  - pip
+  - sympy
+  - pip:
+    - torch
+    - torchvision
+    - torchaudio
+    - warp-lang
+    - bempp-cl
+    - numpy-quaternion

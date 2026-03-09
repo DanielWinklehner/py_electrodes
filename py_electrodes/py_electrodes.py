@@ -411,7 +411,7 @@ class PyElectrodeAssembly(object):
             return _elecs
 
 
-    def get_bempp_mesh(self, brep_h=0.005):
+    def get_bempp_mesh(self, brep_h=None):
         """Assemble full bempp mesh from electrode meshes (in-memory)"""
 
         if not HAVE_BEMPP:
@@ -604,75 +604,357 @@ class PyElectrodeAssembly(object):
     def compute_axis_aligned_surface_intersections(self, mesh_nodes, axes='all',
                                                    use_gpu=None, chunk_size=None):
         """
-        Compute ray-surface intersections for mesh nodes in all cardinal directions.
-        Returns ALL intersections per ray (not just first).
-
-        Returns:
-            intersections: list of dicts, one per mesh node, structured as:
-                [
-                    {  # Node 0
-                        'x+': {electrode_id_1: {...}, electrode_id_2: {...}},
-                        'x-': {electrode_id_3: {...}},
-                        'y+': {...},
-                        ...
-                    },
-                    {...},  # Node 1
-                ]
+        Ultra-fast Mega-Kernel implementation.
+        Computes all 6 cardinal directions simultaneously entirely on the GPU.
+        Returns flat NumPy arrays instead of nested dictionaries.
         """
+        import warp as wp
+        import numpy as np
 
-        if axes == 'all':
-            axes = list(AXIS_DIRECTIONS.keys())
-
-        mesh_nodes = np.asarray(mesh_nodes, dtype=np.float32)
-        assert mesh_nodes.ndim == 2 and mesh_nodes.shape[1] == 3, \
-            "mesh_nodes must be (N, 3) array"
+        if not HAVE_WARP or not use_gpu:
+            raise RuntimeError("This optimized path requires NVIDIA Warp (use_gpu=True).")
 
         N = len(mesh_nodes)
 
-        # Initialize result: list of dicts, one per node
-        intersections = [{} for _ in range(N)]
+        # Pre-allocate flat result arrays on CPU, copy to GPU
+        min_dists_np = np.full((N, 6), 1e30, dtype=np.float32)
+        hit_counts_np = np.zeros((N, 6), dtype=np.int32)
 
-        # Create electrode ID mapping
-        electrode_id_map = {elec_id: idx for idx, elec_id in enumerate(self.electrodes.keys())}
+        origins_wp = wp.array(mesh_nodes, dtype=wp.vec3f)
+        min_dists_wp = wp.array(min_dists_np, dtype=wp.float32)
+        hit_counts_wp = wp.array(hit_counts_np, dtype=wp.int32)
 
-        # Process each direction
-        for axis_name in axes:
-            if axis_name not in AXIS_DIRECTIONS:
-                raise ValueError(f"Unknown axis: {axis_name}")
+        # Helper function inside Warp to get exact cardinal vectors
+        @wp.func
+        def get_ray_dir(d: int):
+            if d == 0: return wp.vec3f(1.0, 0.0, 0.0)
+            if d == 1: return wp.vec3f(-1.0, 0.0, 0.0)
+            if d == 2: return wp.vec3f(0.0, 1.0, 0.0)
+            if d == 3: return wp.vec3f(0.0, -1.0, 0.0)
+            if d == 4: return wp.vec3f(0.0, 0.0, 1.0)
+            if d == 5: return wp.vec3f(0.0, 0.0, -1.0)
+            return wp.vec3f(0.0, 0.0, 0.0)
 
-            ray_direction = AXIS_DIRECTIONS[axis_name]
+        @wp.kernel
+        def mega_kernel_raycast(
+                mesh: wp.uint64,
+                origins: wp.array(dtype=wp.vec3f),
+                min_dists: wp.array(dtype=wp.float32, ndim=2),
+                hit_counts: wp.array(dtype=wp.int32, ndim=2),
+                max_hits: int
+        ):
+            tid = wp.tid()
+            orig = origins[tid]
 
-            # Create ray directions for all mesh nodes
-            ray_directions = np.tile(ray_direction, (N, 1)).astype(np.float32)
+            # Loop over all 6 directions (x+, x-, y+, y-, z+, z-)
+            for d in range(6):
+                direction = get_ray_dir(d)
 
-            # Get intersections in this direction (all hits, not first only)
-            hit_data = self.ray_surface_intersection(
-                mesh_nodes, ray_directions,
-                use_gpu=use_gpu,
-                return_first_hit_only=False,
-                chunk_size=chunk_size
+                current_origin = orig
+                accumulated_t = float(0.0)
+                hits = int(0)
+                first_hit_t = float(1e30)
+
+                for _ in range(max_hits):
+                    # Query BVH
+                    query = wp.mesh_query_ray(mesh, current_origin, direction, float(1e6))
+                    if not query.result:
+                        break
+
+                    hit_t = accumulated_t + query.t
+
+                    # Capture only the closest hit distance for the Shortley-Weller stencil
+                    if hits == 0:
+                        first_hit_t = hit_t
+
+                    hits += 1
+
+                    # Step slightly past the hit to continue ray
+                    eps = float(1e-4)
+                    current_origin = current_origin + direction * (query.t + eps)
+                    accumulated_t = hit_t + eps
+
+                # Write results to global memory
+                if hits > 0:
+                    hit_counts[tid, d] += hits
+
+                    # If this electrode is closer than a previously checked one, update min distance
+                    if first_hit_t < min_dists[tid, d]:
+                        min_dists[tid, d] = first_hit_t
+
+        # Launch kernel sequentially for each electrode.
+        # They will safely accumulate into the same hit_counts and min_dists arrays.
+        for elec_id, electrode in self.electrodes.items():
+            mesh_wp = electrode.get_warp_mesh()
+
+            wp.launch(
+                mega_kernel_raycast,
+                dim=N,
+                inputs=[mesh_wp.id, origins_wp, min_dists_wp, hit_counts_wp, 50]
             )
 
-            # Populate intersections structure
-            for node_idx in range(N):
-                intersections[node_idx][axis_name] = {}
+        wp.synchronize()
 
-                # For each hit on this ray
-                if hit_data['hit_mask'][node_idx]:
-                    electrode_ids = hit_data['electrode_ids'][node_idx]
-                    distances = hit_data['distances'][node_idx]
-                    points = hit_data['hit_points'][node_idx]
+        # Bring back to CPU instantly
+        final_min_dists = min_dists_wp.numpy()
+        final_hit_counts = hit_counts_wp.numpy()
 
-                    # Group by electrode
-                    for elec_idx in np.unique(electrode_ids):
-                        mask = electrode_ids == elec_idx
+        return final_min_dists, final_hit_counts
 
-                        intersections[node_idx][axis_name][elec_idx] = {
-                            'distances': distances[mask],
-                            'points': points[mask],
-                        }
+    # def compute_axis_aligned_surface_intersections(self, mesh_nodes, axes='all',
+    #                                                use_gpu=None, chunk_size=None):
+    #     """
+    #     Compute ray-surface intersections for mesh nodes in all cardinal directions.
+    #     Returns ALL intersections per ray (not just first).
+    #
+    #     Returns:
+    #         intersections: list of dicts, one per mesh node, structured as:
+    #             [
+    #                 {  # Node 0
+    #                     'x+': {electrode_id_1: {...}, electrode_id_2: {...}},
+    #                     'x-': {electrode_id_3: {...}},
+    #                     'y+': {...},
+    #                     ...
+    #                 },
+    #                 {...},  # Node 1
+    #             ]
+    #     """
+    #
+    #     if axes == 'all':
+    #         axes = list(AXIS_DIRECTIONS.keys())
+    #
+    #     mesh_nodes = np.asarray(mesh_nodes, dtype=np.float32)
+    #     assert mesh_nodes.ndim == 2 and mesh_nodes.shape[1] == 3, \
+    #         "mesh_nodes must be (N, 3) array"
+    #
+    #     N = len(mesh_nodes)
+    #
+    #     # Initialize result: list of dicts, one per node
+    #     intersections = [{} for _ in range(N)]
+    #
+    #     # Create electrode ID mapping
+    #     electrode_id_map = {elec_id: idx for idx, elec_id in enumerate(self.electrodes.keys())}
+    #
+    #     # Process each direction
+    #     for axis_name in axes:
+    #         if axis_name not in AXIS_DIRECTIONS:
+    #             raise ValueError(f"Unknown axis: {axis_name}")
+    #
+    #         ray_direction = AXIS_DIRECTIONS[axis_name]
+    #
+    #         # Create ray directions for all mesh nodes
+    #         ray_directions = np.tile(ray_direction, (N, 1)).astype(np.float32)
+    #
+    #         # Get intersections in this direction (all hits, not first only)
+    #         hit_data = self.ray_surface_intersection(
+    #             mesh_nodes, ray_directions,
+    #             use_gpu=use_gpu,
+    #             return_first_hit_only=False,
+    #             chunk_size=chunk_size
+    #         )
+    #
+    #         # Populate intersections structure
+    #         for node_idx in range(N):
+    #             intersections[node_idx][axis_name] = {}
+    #
+    #             # For each hit on this ray
+    #             if hit_data['hit_mask'][node_idx]:
+    #                 electrode_ids = hit_data['electrode_ids'][node_idx]
+    #                 distances = hit_data['distances'][node_idx]
+    #                 points = hit_data['hit_points'][node_idx]
+    #
+    #                 # Group by electrode
+    #                 for elec_idx in np.unique(electrode_ids):
+    #                     mask = electrode_ids == elec_idx
+    #
+    #                     intersections[node_idx][axis_name][elec_idx] = {
+    #                         'distances': distances[mask],
+    #                         'points': points[mask],
+    #                     }
+    #
+    #     return intersections
 
-        return intersections
+    def compute_axis_aligned_surface_intersections(self, mesh_nodes, axes='all',
+                                                   use_gpu=None, chunk_size=None):
+        """
+        Computes all 6 cardinal directions simultaneously.
+        Returns flat NumPy arrays:
+            min_dists_np : (N, 6) float array of closest wall distances
+            hit_counts_np : (N, 6) int array of total boundary crossings
+        """
+        import numpy as np
+
+        # Auto-detect if not specified
+        if use_gpu is None:
+            use_gpu = HAVE_WARP
+
+        if use_gpu and not HAVE_WARP:
+            import warnings
+            warnings.warn("GPU requested but Warp not available. Falling back to CPU.", RuntimeWarning)
+            use_gpu = False
+
+        if use_gpu:
+            return self._compute_axis_aligned_gpu(mesh_nodes)
+        else:
+            return self._compute_axis_aligned_cpu(mesh_nodes, chunk_size)
+
+
+    def _compute_axis_aligned_gpu(self, mesh_nodes):
+        """
+        Ultra-fast Mega-Kernel implementation.
+        Computes all 6 cardinal directions simultaneously entirely on the GPU.
+        Returns flat NumPy arrays instead of nested dictionaries.
+        """
+        N = len(mesh_nodes)
+
+        # Pre-allocate flat result arrays on CPU, copy to GPU
+        min_dists_np = np.full((N, 6), 1e30, dtype=np.float32)
+        hit_counts_np = np.zeros((N, 6), dtype=np.int32)
+
+        origins_wp = wp.array(mesh_nodes, dtype=wp.vec3f)
+        min_dists_wp = wp.array(min_dists_np, dtype=wp.float32)
+        hit_counts_wp = wp.array(hit_counts_np, dtype=wp.int32)
+
+        # Helper function inside Warp to get exact cardinal vectors
+        @wp.func
+        def get_ray_dir(d: int):
+            if d == 0: return wp.vec3f(1.0, 0.0, 0.0)
+            if d == 1: return wp.vec3f(-1.0, 0.0, 0.0)
+            if d == 2: return wp.vec3f(0.0, 1.0, 0.0)
+            if d == 3: return wp.vec3f(0.0, -1.0, 0.0)
+            if d == 4: return wp.vec3f(0.0, 0.0, 1.0)
+            if d == 5: return wp.vec3f(0.0, 0.0, -1.0)
+            return wp.vec3f(0.0, 0.0, 0.0)
+
+        @wp.kernel
+        def mega_kernel_raycast(
+                mesh: wp.uint64,
+                origins: wp.array(dtype=wp.vec3f),
+                min_dists: wp.array(dtype=wp.float32, ndim=2),
+                hit_counts: wp.array(dtype=wp.int32, ndim=2),
+                max_hits: int
+        ):
+            tid = wp.tid()
+            orig = origins[tid]
+
+            # Loop over all 6 directions (x+, x-, y+, y-, z+, z-)
+            for d in range(6):
+                direction = get_ray_dir(d)
+
+                current_origin = orig
+                accumulated_t = float(0.0)
+                hits = int(0)
+                first_hit_t = float(1e30)
+
+                for _ in range(max_hits):
+                    # Query BVH
+                    query = wp.mesh_query_ray(mesh, current_origin, direction, float(1e6))
+                    if not query.result:
+                        break
+
+                    hit_t = accumulated_t + query.t
+
+                    # Capture only the closest hit distance for the Shortley-Weller stencil
+                    if hits == 0:
+                        first_hit_t = hit_t
+
+                    hits += 1
+
+                    # Step slightly past the hit to continue ray
+                    eps = float(1e-4)
+                    current_origin = current_origin + direction * (query.t + eps)
+                    accumulated_t = hit_t + eps
+
+                # Write results to global memory
+                if hits > 0:
+                    hit_counts[tid, d] += hits
+
+                    # If this electrode is closer than a previously checked one, update min distance
+                    if first_hit_t < min_dists[tid, d]:
+                        min_dists[tid, d] = first_hit_t
+
+        # Launch kernel sequentially for each electrode.
+        # They will safely accumulate into the same hit_counts and min_dists arrays.
+        for elec_id, electrode in self.electrodes.items():
+            mesh_wp = electrode.get_warp_mesh()
+
+            wp.launch(
+                mega_kernel_raycast,
+                dim=N,
+                inputs=[mesh_wp.id, origins_wp, min_dists_wp, hit_counts_wp, 50]
+            )
+
+        wp.synchronize()
+
+        # Bring back to CPU instantly
+        final_min_dists = min_dists_wp.numpy()
+        final_hit_counts = hit_counts_wp.numpy()
+
+        return final_min_dists, final_hit_counts
+
+    def _compute_axis_aligned_cpu(self, mesh_nodes, chunk_size=None):
+        """
+        Vectorized CPU fallback using trimesh.
+        Returns flat (N, 6) arrays identical to the GPU method.
+        """
+        import numpy as np
+
+        N = len(mesh_nodes)
+
+        # Pre-allocate output arrays
+        min_dists_np = np.full((N, 6), 1e30, dtype=np.float32)
+        hit_counts_np = np.zeros((N, 6), dtype=np.int32)
+
+        # Standard axes directions mapping to indices 0-5
+        axes_vectors = [
+            (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
+            (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)
+        ]
+
+        if chunk_size is None:
+            chunk_size = 100000  # Trimesh can use a lot of RAM, chunking is safe
+
+        for elec_id, electrode in self.electrodes.items():
+            # Assume PyElectrode has a method to get the trimesh object
+            mesh = electrode._get_trimesh()
+
+            for dir_idx, ray_dir in enumerate(axes_vectors):
+                direction_array = np.tile(ray_dir, (N, 1)).astype(np.float32)
+
+                # Process in chunks to save memory
+                for i in range(0, N, chunk_size):
+                    end_idx = min(i + chunk_size, N)
+                    chunk_origins = mesh_nodes[i:end_idx]
+                    chunk_dirs = direction_array[i:end_idx]
+
+                    # Call trimesh intersection
+                    locations, index_ray, _ = mesh.ray.intersects_location(
+                        ray_origins=chunk_origins,
+                        ray_directions=chunk_dirs,
+                        multiple_hits=True
+                    )
+
+                    if len(locations) == 0:
+                        continue
+
+                    # Shift index_ray back to global node indices
+                    global_ray_indices = index_ray + i
+
+                    # 1. Update Hit Counts (Count occurrences of each ray index)
+                    unique_rays, counts = np.unique(global_ray_indices, return_counts=True)
+                    hit_counts_np[unique_rays, dir_idx] += counts
+
+                    # 2. Update Minimum Distances
+                    # Calculate exact distances for all returned hits
+                    origins_of_hits = mesh_nodes[global_ray_indices]
+                    distances = np.linalg.norm(locations - origins_of_hits, axis=1)
+
+                    # Group by ray_index and find the minimum distance per ray
+                    # Using np.minimum.at handles duplicate ray indices automatically
+                    np.minimum.at(min_dists_np[:, dir_idx], global_ray_indices, distances)
+
+        return min_dists_np, hit_counts_np
 
     def compute_surface_distances(self, mesh_nodes, exclude_electrode_id=None,
                                   use_gpu=None):  # Keep for API compatibility
@@ -786,6 +1068,7 @@ class PyElectrode(object):
         self._gmsh_msh = None
         self._occ_obj = None
         self._bempp_domain = None
+        self._brep_h = 0.005
 
         self._transformation = CoordinateTransformation3D()
 
@@ -794,6 +1077,14 @@ class PyElectrode(object):
         if self._geo_str is not None:
             self._originated_from = "geo_str"
             self.generate_from_geo_str(self._geo_str)
+
+    @property
+    def brep_h(self):
+        return self._brep_h
+
+    @brep_h.setter
+    def brep_h(self, brep_h):
+        self._brep_h = brep_h
 
     @property
     def color(self):
@@ -872,12 +1163,15 @@ class PyElectrode(object):
             sys.stdout.flush()
         return 0
 
-    def generate_mesh(self, brep_h=0.005):
+    def generate_mesh(self, brep_h=None):
         """Generate 2D surface mesh using gmsh Python API"""
 
         if self._orig_file is None:
             print("No geometry loaded yet!")
             return 1
+
+        if brep_h is None:
+            brep_h = self._brep_h
 
         import gmsh
 
@@ -915,7 +1209,7 @@ class PyElectrode(object):
 
             # Note: geo files have mesh size information, brep does not
             if self._originated_from == "brep":
-                gmsh.model.mesh.setSize(gmsh.model.getEntities(2), brep_h)
+                gmsh.model.mesh.setSize(gmsh.model.getEntities(0), brep_h)
             gmsh.model.mesh.generate(2)
 
             # Extract mesh data
@@ -987,11 +1281,17 @@ class PyElectrode(object):
 
         return 0
 
-    def generate_from_file(self, filename=None):
+    def generate_from_file(self, filename=None, input_units=None):
         """
-        Loads the electrode object from file. Extension can be .brep, .geo, .stl
+        Loads the electrode object from file. Extension can be .brep, .geo, .stl, .stp
         :param filename: input file name.
+        :input_units: input units. Cave: Will not be applied for geo strings and .geo files.
         :return:
+
+        TODO: Handle scaling of input units. Currently, the OCC object can be scaled, but the
+              meshing depends on the original input file and is unscaled!!!
+
+
         """
 
         if filename is None:
@@ -1011,16 +1311,16 @@ class PyElectrode(object):
 
             if ext.lower() == ".brep":
                 self._originated_from = "brep"
-                self._generate_from_brep()
+                self._generate_from_brep(input_units=input_units)
             elif ext.lower() == ".geo":
                 self._originated_from = "geo_file"
                 self._generate_from_geo()
             elif ext.lower() == ".stl":
                 self._originated_from = "stl"
-                self._generate_from_stl()
-            # elif ext.lower() in [".stp", ".step"]:
-            #     self._originated_from = "step"
-            #     self._generate_from_step()
+                self._generate_from_stl(input_units=input_units)
+            elif ext.lower() in [".stp", ".step"]:
+                self._originated_from = "step"
+                self._generate_from_step(input_units=input_units)
 
             return 0
 
@@ -1028,13 +1328,27 @@ class PyElectrode(object):
 
             return 1
 
-    def _generate_from_brep(self):
+    def _generate_from_brep(self, input_units=None):
         self._debug_message("Generating from brep")
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
         self._occ_obj.translation = self._transformation.translation
         self._occ_obj.rotation = self._transformation.rotation
-        error = self._occ_obj.load_from_brep(self._orig_file)
+        error = self._occ_obj.load_from_brep(self._orig_file, input_units=input_units)
+
+        if error:
+            return error
+        else:
+            self._initialized = True
+            return 0
+
+    def _generate_from_step(self, input_units=None):
+        self._debug_message("Generating from step")
+
+        self._occ_obj = PyOCCElectrode(debug=DEBUG)
+        self._occ_obj.translation = self._transformation.translation
+        self._occ_obj.rotation = self._transformation.rotation
+        error = self._occ_obj.load_from_step(self._orig_file, input_units=input_units)
 
         if error:
             return error
@@ -1096,10 +1410,28 @@ class PyElectrode(object):
             self._initialized = True
             return 0
 
+    def get_warp_mesh(self):
+        """Build and cache the NVIDIA Warp BVH mesh."""
+        import warp as wp
+        import numpy as np
+
+        if not hasattr(self, '_warp_mesh') or self._warp_mesh is None:
+            mesh = self._get_trimesh()
+            vertices = np.asarray(mesh.vertices, dtype=np.float32)
+            faces = np.asarray(mesh.faces, dtype=np.int32)
+
+            # Cache the Warp mesh object natively
+            self._warp_mesh = wp.Mesh(
+                points=wp.array(vertices, dtype=wp.vec3f),
+                indices=wp.array(faces.flatten(), dtype=wp.int32)
+            )
+
+        return self._warp_mesh
+
     def _get_trimesh(self):
         """
         Cached trimesh object for collision detection.
-        Loads mesh only once, then returns cached version.
+        Uses in-memory mesh from self._gmsh_msh.
         """
         if not hasattr(self, '_trimesh_cache') or self._trimesh_cache is None:
             if not HAVE_TRIMESH:
@@ -1108,19 +1440,14 @@ class PyElectrode(object):
                     "Install with: pip install trimesh"
                 )
 
-            if self.gmsh_file is None:
+            # Ensure mesh is generated and stored in memory
+            if self._gmsh_msh is None:
                 self.generate_mesh()
 
-            mesh_data = meshio.read(self.gmsh_file)
-            vertices = mesh_data.points
+            vertices = self._gmsh_msh['vertices']
+            triangles = self._gmsh_msh['elements']
 
-            triangles = None
-            for cell_block in mesh_data.cells:
-                if cell_block.type == "triangle":
-                    triangles = cell_block.data
-                    break
-
-            if triangles is None:
+            if triangles is None or len(triangles) == 0:
                 raise RuntimeError(f"No triangles in mesh for {self.name}")
 
             self._trimesh_cache = trimesh.Trimesh(

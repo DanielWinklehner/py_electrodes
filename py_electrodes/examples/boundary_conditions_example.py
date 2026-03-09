@@ -36,7 +36,7 @@ Mesh.CharacteristicLengthMax = 0.005;  // maximum mesh size
 
     # Create a coarse mesh grid for field solver
     # Nevermind centers of cells, this is just to test if ray-surface
-    # intersections along the exes work
+    # intersections along the axes work
     print("Creating field mesh nodes...")
     n_x, n_y, n_z = 13, 13, 13
 

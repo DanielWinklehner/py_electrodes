@@ -1,4 +1,4 @@
-DEBUG::True
+DEBUG::False
 DECIMALS::12
 TEMP_DIR::temp
 DEBUG_DIR::debug_output

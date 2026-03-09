@@ -22,6 +22,13 @@ Z = 2
 AXES = {"X": 0, "Y": 1, "Z": 2}
 XYZ = range(3)  # All directions as a list
 
+UNIT_SCALER = {
+    'mm': 0.001,
+    'cm': 0.01,
+    'dm': 0.1,
+    'm': 1.0
+}
+
 __author__ = "Daniel Winklehner"
 __doc__ = """Create electrodes using gmsh and pythonocc-core for use in field calculations and particle tracking"""
 
@@ -62,6 +69,8 @@ try:
     from OCC.Display.SimpleGui import init_display
     from OCC.Core.TopTools import TopTools_ListOfShape
     from OCC.Core.BRepMesh import BRepMesh_IncrementalMesh
+    from OCC.Core.STEPControl import STEPControl_Reader
+    from OCC.Core.IFSelect import IFSelect_RetDone
     HAVE_OCC = True
 except ImportError:
     if DEBUG:
@@ -184,10 +193,11 @@ class PyOCCElectrode(object):
             self._socl_s = [self._socl]
             self._n_s = 1
 
-    def load_from_stl(self, filename=None):
+    def load_from_stl(self, filename=None, input_units=None):
         """
         STL is a mesh format. Segmentation will not work (yet) if the object is loaded as STL!
         :param filename:
+        :param input_units:
         :return:
         """
 
@@ -203,6 +213,15 @@ class PyOCCElectrode(object):
 
         # Create the OCC solid + bbox
         self._elec = read_stl_file(filename)
+
+        # Scale from input units to m
+        if input_units is not None:
+            scale_factor = UNIT_SCALER[input_units]
+            if scale_factor != 1.0:
+                scale_trsf = gp_Trsf()
+                scale_trsf.SetScale(gp_Pnt(0.0, 0.0, 0.0), scale_factor)
+                # Apply the scaling transformation
+                self._elec = BRepBuilderAPI_Transform(self._elec, scale_trsf).Shape()
 
         # First apply rotation
         self._transformation.SetRotation(self._rotation)
@@ -222,10 +241,11 @@ class PyOCCElectrode(object):
 
         return 0
 
-    def load_from_brep(self, filename=None):
+    def load_from_brep(self, filename=None, input_units=None):
         """
         BREP is the native OpenCascade format for shapes/objects/solids, etc.
         :param filename:
+        :param input_units:
         :return:
         """
 
@@ -264,6 +284,15 @@ class PyOCCElectrode(object):
             print("Number of compounds: {}".format(_te.number_of_compounds()))
             print("Number of compound solids: {}".format(_te.number_of_comp_solids()))
 
+        # Scale from input units to m
+        if input_units is not None:
+            scale_factor = UNIT_SCALER[input_units]
+            if scale_factor != 1.0:
+                scale_trsf = gp_Trsf()
+                scale_trsf.SetScale(gp_Pnt(0.0, 0.0, 0.0), scale_factor)
+                # Apply the scaling transformation
+                self._elec = BRepBuilderAPI_Transform(self._elec, scale_trsf).Shape()
+
         # First apply rotation
         self._transformation.SetRotation(self._rotation)
         self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
@@ -282,23 +311,85 @@ class PyOCCElectrode(object):
 
         return 0
 
-    # def load_from_step(self, filename=None):
-    #
-    #     if filename is None:
-    #         return 1
-    #
-    #     assert os.path.splitext(filename)[1] in [".stp", ".step"], "File extension does not match 'step' file!"
-    #
-    #     self._filename = filename
-    #
-    #     print("Proc {} loading from STEP file and generating OCC Object...".format(RANK))
-    #     sys.stdout.flush()
-    #
-    #     self._elec = read_step_file(filename)
-    #     self._socl = BRepClass3d_SolidClassifier(self._elec)
-    #     self._bbox = self.create_bbox(self._elec, self._tol)
-    #
-    #     return 0
+    def load_from_step(self, filename=None, input_units=None):
+        """
+        STEP is a standard 3D CAD file format.
+        :param filename:
+        :return:
+        """
+
+        if filename is None:
+            return 1
+
+        # Accept both .stp and .step extensions
+        ext = os.path.splitext(filename)[1].lower()
+        assert ext in [".stp", ".step"], "File extension does not match 'stp' or 'step'!"
+
+        self._filename = filename
+
+        print("Proc {} loading from STEP file and generating OCC Object...".format(RANK))
+        sys.stdout.flush()
+
+        # Initialize the STEP reader
+        step_reader = STEPControl_Reader()
+        status = step_reader.ReadFile(filename)
+
+        if status != IFSelect_RetDone:
+            raise Exception(f"Failed to read STEP file {filename}")
+
+        # Transfer the STEP roots into OpenCASCADE geometry
+        step_reader.TransferRoots()
+        load_shape = step_reader.OneShape()
+
+        # The loaded shape is often a compound. We select the solid only.
+        _te = TopologyExplorer(load_shape)
+
+        # Here we make our way down from solids to surfaces to edges
+        if len(list(_te.solids())) > 0:
+            self._elec = list(_te.solids())[0]  # TODO: What if there are more than 1 solid? -DW
+        elif len(list(_te.faces())) > 0:
+            self._elec = list(_te.faces())[0]
+        elif len(list(_te.edges())) > 0:
+            self._elec = list(_te.edges())[0]
+        else:
+            print("Couldn't extract solid/face/edge from step file")
+            print("Number of faces: {}".format(_te.number_of_faces()))
+            print("Number of vertices: {}".format(_te.number_of_vertices()))
+            print("Number of wires: {}".format(_te.number_of_wires()))
+            print("Number of edges: {}".format(_te.number_of_edges()))
+            print("Number of shells: {}".format(_te.number_of_shells()))
+            print("Number of solids: {}".format(_te.number_of_solids()))
+            print("Number of compounds: {}".format(_te.number_of_compounds()))
+            print("Number of compound solids: {}".format(_te.number_of_comp_solids()))
+
+        if input_units is not None:
+            # Scale from input units to m
+            scale_factor = UNIT_SCALER[input_units]
+
+            # Apply scaling
+            if scale_factor != 1.0:
+                from OCC.Core.gp import gp_Trsf, gp_Pnt
+                scale_trsf = gp_Trsf()
+                scale_trsf.SetScale(gp_Pnt(0.0, 0.0, 0.0), scale_factor)
+                self._elec = BRepBuilderAPI_Transform(self._elec, scale_trsf).Shape()
+
+        # First apply rotation
+        self._transformation.SetRotation(self._rotation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
+        # Then apply translation
+        self._transformation.SetTranslation(self._translation)
+        self._elec = BRepBuilderAPI_Transform(self._elec, self._transformation).Shape()
+
+        self._socl = BRepClass3d_SolidClassifier(self._elec)
+        self._bbox = self.create_bbox(self._elec, self._tol, self._bbox_use_mesh)
+
+        self._elec_s = [self._elec]
+        self._bbox_s = [self._bbox]
+        self._socl_s = [self._socl]
+        self._n_s = 1
+
+        return 0
 
     @staticmethod
     def create_bbox(elec, tol, use_mesh=False):

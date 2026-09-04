@@ -293,7 +293,11 @@ class PyElectrodeAssembly(object):
                   "Consider using set_translation(), set_rotation_angle_axis()")
 
     def bounding_box(self):
-        """Get combined bounding box of all electrodes"""
+        """Combined bounding box of all electrodes
+
+        :return: (xmin, ymin, zmin, xmax, ymax, zmax), matching the ordering of
+                 OCC Bnd_Box.Get() and gmsh getBoundingBox().
+        """
         bounds_list = [e.bounding_box() for e in self._electrodes.values()
                        if e.bounding_box() is not None]
 
@@ -302,13 +306,13 @@ class PyElectrodeAssembly(object):
 
         # Unpack and merge
         xmins = [b[0] for b in bounds_list]
-        xmaxs = [b[1] for b in bounds_list]
-        ymins = [b[2] for b in bounds_list]
-        ymaxs = [b[3] for b in bounds_list]
-        zmins = [b[4] for b in bounds_list]
+        ymins = [b[1] for b in bounds_list]
+        zmins = [b[2] for b in bounds_list]
+        xmaxs = [b[3] for b in bounds_list]
+        ymaxs = [b[4] for b in bounds_list]
         zmaxs = [b[5] for b in bounds_list]
 
-        return (min(xmins), max(xmaxs), min(ymins), max(ymaxs), min(zmins), max(zmaxs))
+        return (min(xmins), min(ymins), min(zmins), max(xmaxs), max(ymaxs), max(zmaxs))
 
     def export(self, filename):
         # TODO: Add transformation! -DW
@@ -1067,6 +1071,7 @@ class PyElectrode(object):
         self._gmsh_file = None
         self._gmsh_msh = None
         self._occ_obj = None
+        self._gmsh_bbox = None  # (xmin, ymin, zmin, xmax, ymax, zmax) when loaded via gmsh
         self._bempp_domain = None
         self._brep_h = 0.005
 
@@ -1137,11 +1142,42 @@ class PyElectrode(object):
             print("Can only set the full transformation as a CoordinateTransformation3D object! "
                   "Consider using set_translation(), set_rotation_angle_axis()")
 
+    def _transformed_bbox(self, bbox):
+        """Axis-aligned box around the transformed corners of an untransformed bbox.
+
+        Conservative for rotations: the box around the rotated corners can be larger
+        than the true bounding box of the rotated solid, never smaller.
+
+        :param bbox: (xmin, ymin, zmin, xmax, ymax, zmax)
+        :return: (xmin, ymin, zmin, xmax, ymax, zmax)
+        """
+        xmin, ymin, zmin, xmax, ymax, zmax = bbox
+
+        corners = np.array([[x, y, z]
+                            for x in (xmin, xmax)
+                            for y in (ymin, ymax)
+                            for z in (zmin, zmax)])
+
+        corners = self._transformation.apply_to_points(corners)
+
+        return (corners[:, 0].min(), corners[:, 1].min(), corners[:, 2].min(),
+                corners[:, 0].max(), corners[:, 1].max(), corners[:, 2].max())
+
     def bounding_box(self):
-        """Get bounding box of electrode from OCC object"""
-        if self._occ_obj is None:
-            return None
-        return self._occ_obj.get_bounds()  # Returns (xmin, xmax, ymin, ymax, zmin, zmax)
+        """Bounding box of the electrode as (xmin, ymin, zmin, xmax, ymax, zmax)
+
+        Note: this is the ordering OCC Bnd_Box.Get() and gmsh getBoundingBox()
+        actually return; the old docstring here claimed x/x/y/y/z/z.
+        """
+        if self._occ_obj is not None:
+            return self._occ_obj.get_bounds()
+
+        if self._gmsh_bbox is not None:
+            # Loaded through gmsh: the cached box is untransformed, so apply the
+            # current transformation the way generate_mesh() will.
+            return self._transformed_bbox(self._gmsh_bbox)
+
+        return None
 
     def set_translation(self, translation, absolute=True):
 
@@ -1207,8 +1243,8 @@ class PyElectrode(object):
 
             gmsh.model.occ.synchronize()
 
-            # Note: geo files have mesh size information, brep does not
-            if self._originated_from == "brep":
+            # Note: geo files have mesh size information, brep and step do not
+            if self._originated_from in ("brep", "step"):
                 gmsh.model.mesh.setSize(gmsh.model.getEntities(0), brep_h)
             gmsh.model.mesh.generate(2)
 
@@ -1303,9 +1339,10 @@ class PyElectrode(object):
 
         if os.path.isfile(filename):
             name, ext = os.path.splitext(filename)
+            ext = ext.lower()
 
-            assert ext in [".brep", ".geo", ".stl"], \
-                "Extension has to be .brep, .geo, .stl"
+            assert ext in [".brep", ".geo", ".stl", ".stp", ".step"], \
+                "Extension has to be .brep, .geo, .stl, .stp or .step"
 
             self._orig_file = filename
 
@@ -1343,18 +1380,49 @@ class PyElectrode(object):
             return 0
 
     def _generate_from_step(self, input_units=None):
-        self._debug_message("Generating from step")
+        """Load a STEP file through the gmsh OCC kernel - no pythonocc required.
 
-        self._occ_obj = PyOCCElectrode(debug=DEBUG)
-        self._occ_obj.translation = self._transformation.translation
-        self._occ_obj.rotation = self._transformation.rotation
-        error = self._occ_obj.load_from_step(self._orig_file, input_units=input_units)
+        The surface mesh itself is produced later by generate_mesh(), which opens the
+        same file with gmsh and applies the transformations there. All this does is
+        check that gmsh can read the file and cache the bounding box, which for the
+        other formats is served by the pythonocc object.
 
-        if error:
-            return error
-        else:
-            self._initialized = True
-            return 0
+        Note: electrodes loaded this way have no _occ_obj, so points_inside(), show()
+        and export() are unavailable for them until those move to gmsh/Warp as well.
+        """
+        self._debug_message("Generating from step (gmsh)")
+
+        if input_units is not None:
+            print("Warning: input_units is not yet applied to STEP files read by gmsh.")
+
+        import gmsh
+
+        try:
+            gmsh.initialize()
+            gmsh.open(self._orig_file)
+            gmsh.model.occ.synchronize()
+
+            if len(gmsh.model.getEntities()) == 0:
+                self._debug_message("gmsh read no entities from {}".format(self._orig_file))
+                return 1
+
+            # gmsh returns (xmin, ymin, zmin, xmax, ymax, zmax), the same ordering
+            # OCC Bnd_Box.Get() uses, so it is stored unchanged.
+            self._gmsh_bbox = tuple(gmsh.model.getBoundingBox(-1, -1))
+
+        except Exception as e:
+            self._debug_message("gmsh error while loading step: {}".format(e))
+            return 1
+
+        finally:
+            try:
+                gmsh.finalize()
+            except Exception:
+                pass
+
+        self._initialized = True
+
+        return 0
 
     def _generate_from_geo(self):
         """Generate OCC object from .geo file using gmsh Python API"""
@@ -1396,7 +1464,7 @@ class PyElectrode(object):
             self._initialized = True
             return 0
 
-    def _generate_from_stl(self):
+    def _generate_from_stl(self, input_units=None):
         self._debug_message("Generating from stl")
 
         self._occ_obj = PyOCCElectrode(debug=DEBUG)
@@ -2275,6 +2343,11 @@ class PyElectrode(object):
 
         if not self._initialized:
             return 1
+
+        if self._occ_obj is None:
+            # Loaded through gmsh (e.g. STEP): transformations are applied when the
+            # mesh is generated, so there is no OCC object to update here.
+            return 0
 
         self._occ_obj.translation = self._transformation.translation
         self._occ_obj.rotation = self._transformation.rotation

@@ -156,7 +156,7 @@ class PyOCCElectrode(object):
         """
         get the bounds of the full electrode (plus tolerance)
         TODO: Think about subtracting tolerance?
-        :return: xmin, xmax, ymin, ymax, zmin, zmax
+        :return: xmin, ymin, zmin, xmax, ymax, zmax  (OCC Bnd_Box.Get() ordering)
         """
         return self._bbox.Get()
 

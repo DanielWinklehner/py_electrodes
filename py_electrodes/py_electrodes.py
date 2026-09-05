@@ -1258,7 +1258,10 @@ class PyElectrode(object):
             # Reshape data
             vertices = node_coords.reshape(-1, 3).astype(np.float32)
 
-            # Handle multiple element types (should be just triangles, but be safe)
+            # Handle multiple element types. gmsh recombines some surfaces into
+            # quadrangles, so one surface mesh can mix 3- and 4-node elements and
+            # vstacking them directly raises. BEM++ needs triangles, so each quad
+            # (a, b, c, d) is split into (a, b, c) and (a, c, d).
             all_elements = []
             all_tags = []
             for elem_type, elem_tag, elem_conn in zip(elem_types, elem_tags, elem_connectivity):
@@ -1269,8 +1272,23 @@ class PyElectrode(object):
 
                 # Convert to 0-indexed
                 elements = elements - 1
-                all_elements.append(elements)
-                all_tags.append(elem_tag)
+
+                if nodes_per_elem == 3:
+                    all_elements.append(elements)
+                    all_tags.append(elem_tag)
+
+                elif nodes_per_elem == 4:
+                    self._debug_message(
+                        "Splitting {} quadrangles into triangles".format(n_elems))
+                    all_elements.append(np.vstack([elements[:, [0, 1, 2]],
+                                                   elements[:, [0, 2, 3]]]))
+                    all_tags.append(np.repeat(elem_tag, 2))
+
+                else:
+                    raise RuntimeError(
+                        "Surface mesh element type {} has {} nodes; only 3-node "
+                        "triangles and 4-node quadrangles are supported".format(
+                            elem_type, nodes_per_elem))
 
             # Concatenate all elements
             elements = np.vstack(all_elements).astype(np.int32)
@@ -1285,15 +1303,24 @@ class PyElectrode(object):
 
             self._debug_message(f"Mesh generated: {len(vertices)} vertices, {len(elements)} elements")
 
-            # Save .msh file if debugging
+            # Save .msh file if debugging. DEBUG_OUTPUT_DIR is relative, so this
+            # fails whenever the cwd has no such directory - which must not throw
+            # away the mesh that was just built successfully.
             if DEBUG:
-                self._gmsh_file = os.path.join(DEBUG_OUTPUT_DIR, "{}.msh".format(self._id))
-                gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
-                gmsh.write(self._gmsh_file)
-                self._debug_message(f"Mesh saved to {self._gmsh_file} (debug mode)")
+                try:
+                    os.makedirs(DEBUG_OUTPUT_DIR, exist_ok=True)
+                    self._gmsh_file = os.path.join(DEBUG_OUTPUT_DIR, "{}.msh".format(self._id))
+                    gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+                    gmsh.write(self._gmsh_file)
+                    self._debug_message(f"Mesh saved to {self._gmsh_file} (debug mode)")
+                except Exception as debug_exc:
+                    print("Warning: could not write debug mesh for '{}': {}".format(
+                        self.name, debug_exc))
 
         except Exception as e:
-            self._debug_message(f"gmsh error: {e}")
+            # Printed, not _debug_message: returning 1 leaves _gmsh_msh as None and
+            # the caller (get_bempp_mesh) then fails with an unrelated TypeError.
+            print("gmsh error while meshing electrode '{}': {}".format(self.name, e))
             return 1
 
         finally:

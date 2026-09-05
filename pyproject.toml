@@ -12,7 +12,7 @@ name = "py_electrodes"
 version = "1.2.0"
 description = "Classes and methods for creating electrode objects using gmsh and pythonocc-core"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Daniel Winklehner", email = "winklehn@mit.edu"}
 ]
@@ -56,12 +56,13 @@ Repository = "https://github.com/DanielWinklehner/py_electrodes.git"
 
 [tool.setuptools]
 packages = ["py_electrodes"]
+include-package-data = true
+license-files = ["LICENSE"]
 
 [tool.setuptools.package-data]
 py_electrodes = [
     "Settings.txt",
     "resources/*",
-    "examples/*",
 ]
 
 [tool.black]

@@ -315,11 +315,49 @@ class PyElectrodeAssembly(object):
         return (min(xmins), min(ymins), min(zmins), max(xmaxs), max(ymaxs), max(zmaxs))
 
     def export(self, filename):
-        # TODO: Add transformation! -DW
+        """Write all electrodes to one CAD file.
 
-        file_type = filename.split('.')[-1]
+        STEP/BREP: every electrode is exported through gmsh with its transformation
+        applied (see PyElectrode.export) into a temporary file, the files are merged
+        into one gmsh model and written together, so the assembly file matches the
+        BEM mesh. STL/IGES still go through the OCC compound, which carries no
+        transformations set after loading.
+        """
+        file_type = filename.split('.')[-1].lower()
 
-        assert file_type in ['step', 'stp', 'stl', 'iges'], "File type must be '.step', '.stp', '.stl', or '.iges'!"
+        assert file_type in ['step', 'stp', 'brep', 'stl', 'iges'], \
+            "File type must be '.step', '.stp', '.brep', '.stl', or '.iges'!"
+
+        if file_type in ('step', 'stp', 'brep'):
+            import gmsh
+
+            _tmp = tempfile.mkdtemp(prefix="py_electrodes_export_")
+            try:
+                parts = []
+                for _id, electrode in self._electrodes.items():
+                    _fn = os.path.join(_tmp, "{}.step".format(_id))
+                    if electrode.export(_fn) != 0:
+                        print("Could not export electrode '{}'".format(electrode.name))
+                        return 1
+                    parts.append(_fn)
+
+                gmsh.initialize()
+                gmsh.option.setNumber("General.Terminal", 0)
+                for _fn in parts:
+                    gmsh.merge(_fn)
+                gmsh.model.occ.synchronize()
+                gmsh.write(filename)
+            except Exception as e:
+                print("gmsh error while exporting the assembly: {}".format(e))
+                return 1
+            finally:
+                try:
+                    gmsh.finalize()
+                except Exception:
+                    pass
+                shutil.rmtree(_tmp, ignore_errors=True)
+
+            return 0
 
         # Assemble all occ_electrodes into a compound
         builder = BRep_Builder()
@@ -1199,6 +1237,31 @@ class PyElectrode(object):
             sys.stdout.flush()
         return 0
 
+    def _apply_transformation_in_gmsh(self, gmsh):
+        """Rotate and translate the geometry currently loaded in gmsh by this
+        electrode's transformation. Shared by generate_mesh() and export(), so a
+        written STEP file is exactly what the BEM mesh saw."""
+        # Get rotation (quaternion to angle-axis)
+        v_rot = quaternion.as_rotation_vector(self._transformation.rotation)
+        angle = np.linalg.norm(v_rot)
+
+        # Apply rotation and translation if non-negligible. DECIMALS is a number of
+        # decimal places, so the threshold is 10**-DECIMALS; it used to be
+        # 1/DECIMALS = 0.083, which silently dropped every translation under
+        # 83 mm and every rotation under 4.8 deg.
+        if angle > 10.0 ** (-DECIMALS):
+            axis = v_rot / angle
+            gmsh.model.occ.rotate(gmsh.model.getEntities(), 0.0, 0.0, 0.0,
+                                  axis[0], axis[1], axis[2], angle)
+
+        tx, ty, tz = self._transformation.translation
+        if np.abs(tx) + np.abs(ty) + np.abs(tz) > 10.0 ** (-DECIMALS):
+            if DEBUG:
+                print(f"Applying translation {tx}, {ty}, {tz} to electrode {self.name}")
+            gmsh.model.occ.translate(gmsh.model.getEntities(), tx, ty, tz)
+
+        gmsh.model.occ.synchronize()
+
     def generate_mesh(self, brep_h=None):
         """Generate 2D surface mesh using gmsh Python API"""
 
@@ -1215,36 +1278,10 @@ class PyElectrode(object):
             # Initialize gmsh
             gmsh.initialize()
 
-            # Open geometry
+            # Open geometry and place it
             gmsh.open(self._orig_file)
             gmsh.model.occ.synchronize()
-
-            # Get rotation (quaternion to angle-axis)
-            v_rot = quaternion.as_rotation_vector(self._transformation.rotation)
-            angle = np.linalg.norm(v_rot)
-
-            # Apply rotation and translation if non-negligible. DECIMALS is a number of
-            # decimal places, so the threshold is 10**-DECIMALS; it used to be
-            # 1/DECIMALS = 0.083, which silently dropped every translation under
-            # 83 mm and every rotation under 4.8 deg.
-            if angle > 10.0 ** (-DECIMALS):
-                axis = v_rot / angle
-                origin = [0.0, 0.0, 0.0]
-
-                gmsh.model.occ.rotate(gmsh.model.getEntities(),
-                                      origin[0], origin[1], origin[2],
-                                      axis[0], axis[1], axis[2], angle)
-
-            # Apply translation
-            tx, ty, tz = self._transformation.translation
-            if np.abs(tx) + np.abs(ty) + np.abs(tz) > 10.0 ** (-DECIMALS):
-
-                if DEBUG:
-                    print(f"Applying translation {tx}, {ty}, {tz} to electrode {self.name}")
-
-                gmsh.model.occ.translate(gmsh.model.getEntities(), tx, ty, tz)
-
-            gmsh.model.occ.synchronize()
+            self._apply_transformation_in_gmsh(gmsh)
 
             # Note: geo files have mesh size information, brep and step do not
             if self._originated_from in ("brep", "step"):
@@ -2355,15 +2392,54 @@ class PyElectrode(object):
 
             return 1
 
-    def export(self, filename):
+    def export(self, filename, use_gmsh=None):
+        """Write the electrode to a CAD file.
 
-        if self._occ_obj is not None:
+        STEP and BREP go through gmsh, from the original geometry file, with the
+        rotation and translation applied exactly as generate_mesh() applies them, so
+        the file matches the BEM mesh. The OCC object's own export does not know
+        about transformations set after loading (it dropped the alignment shift and
+        put a set_translation-placed aperture back at the origin) and is used only
+        for STL/IGES, or when use_gmsh is False, or when there is no geometry file.
 
-            return self._occ_obj.export(filename)
+        :param filename: output file; extension selects the format
+        :param use_gmsh: force (True) or forbid (False) the gmsh path; None decides
+                         by format and availability
+        :return: 0 on success, 1 otherwise
+        """
+        file_type = filename.split('.')[-1].lower()
 
-        else:
+        if use_gmsh is None:
+            use_gmsh = file_type in ("step", "stp", "brep") and self._orig_file is not None
 
+        if not use_gmsh:
+            if self._occ_obj is not None:
+                return self._occ_obj.export(filename)
             return 1
+
+        if self._orig_file is None:
+            print("Electrode '{}' has no geometry file to export from".format(self.name))
+            return 1
+
+        import gmsh
+
+        try:
+            gmsh.initialize()
+            gmsh.option.setNumber("General.Terminal", 0)
+            gmsh.open(self._orig_file)
+            gmsh.model.occ.synchronize()
+            self._apply_transformation_in_gmsh(gmsh)
+            gmsh.write(filename)
+        except Exception as e:
+            print("gmsh error while exporting electrode '{}': {}".format(self.name, e))
+            return 1
+        finally:
+            try:
+                gmsh.finalize()
+            except Exception:
+                pass
+
+        return 0
 
     def update_transformations(self):
         """

@@ -1223,8 +1223,11 @@ class PyElectrode(object):
             v_rot = quaternion.as_rotation_vector(self._transformation.rotation)
             angle = np.linalg.norm(v_rot)
 
-            # Apply rotation if non-negligible
-            if angle > 1.0 / DECIMALS:
+            # Apply rotation and translation if non-negligible. DECIMALS is a number of
+            # decimal places, so the threshold is 10**-DECIMALS; it used to be
+            # 1/DECIMALS = 0.083, which silently dropped every translation under
+            # 83 mm and every rotation under 4.8 deg.
+            if angle > 10.0 ** (-DECIMALS):
                 axis = v_rot / angle
                 origin = [0.0, 0.0, 0.0]
 
@@ -1234,7 +1237,7 @@ class PyElectrode(object):
 
             # Apply translation
             tx, ty, tz = self._transformation.translation
-            if np.abs(tx) + np.abs(ty) + np.abs(tz) > 1.0 / DECIMALS:
+            if np.abs(tx) + np.abs(ty) + np.abs(tz) > 10.0 ** (-DECIMALS):
 
                 if DEBUG:
                     print(f"Applying translation {tx}, {ty}, {tz} to electrode {self.name}")

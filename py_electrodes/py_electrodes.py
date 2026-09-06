@@ -139,6 +139,68 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+if HAVE_WARP:
+    # Defined once at import: a kernel created inside a method is re-registered with Warp
+    # on every call, which leaked ~100 KB per call (2.6 GB per 1,500-particle tracking run).
+    @wp.kernel
+    def _segment_intersect_kernel(
+            origins: wp.array(dtype=wp.vec3f),
+            directions: wp.array(dtype=wp.vec3f),
+            vertices: wp.array(dtype=wp.vec3f),
+            faces: wp.array(dtype=wp.int32),
+            n_tri: wp.int32,
+            seg_distances: wp.array(dtype=wp.float32),
+            hits: wp.array(dtype=wp.uint8),
+            points: wp.array(dtype=wp.vec3f),
+            fractions: wp.array(dtype=wp.float32),
+    ):
+        seg_id = wp.tid()
+
+        origin = origins[seg_id]
+        direction = directions[seg_id]
+        max_dist = seg_distances[seg_id]
+
+        closest_t = max_dist
+        closest_point = wp.vec3f(0.0, 0.0, 0.0)
+
+        for tri_id in range(n_tri):
+            base = tri_id * 3
+            v0 = vertices[faces[base]]
+            v1 = vertices[faces[base + 1]]
+            v2 = vertices[faces[base + 2]]
+
+            edge1 = v1 - v0
+            edge2 = v2 - v0
+            h = wp.cross(direction, edge2)
+            a = wp.dot(edge1, h)
+
+            if wp.abs(a) < 1e-7:
+                continue
+
+            inv_a = 1.0 / a
+            s = origin - v0
+            u = wp.dot(s, h) * inv_a
+
+            if u < 0.0 or u > 1.0:
+                continue
+
+            q = wp.cross(s, edge1)
+            v = wp.dot(direction, q) * inv_a
+
+            if v < 0.0 or u + v > 1.0:
+                continue
+
+            t = wp.dot(edge2, q) * inv_a
+
+            if t > 1e-6 and t < closest_t:
+                closest_t = t
+                closest_point = origin + direction * t
+
+        if closest_t < max_dist:
+            hits[seg_id] = wp.uint8(1)
+            points[seg_id] = closest_point
+            fractions[seg_id] = closest_t / max_dist
+
 def _warp_to_numpy(warp_array):
     """Convert Warp array to numpy, handling different Warp versions"""
     try:
@@ -2212,69 +2274,10 @@ class PyElectrode(object):
             hit_points = wp.zeros(N, dtype=wp.vec3f)
             hit_fractions = wp.zeros(N, dtype=wp.float32)
 
-            @wp.kernel
-            def segment_intersect_kernel(
-                    origins: wp.array(dtype=wp.vec3f),
-                    directions: wp.array(dtype=wp.vec3f),
-                    vertices: wp.array(dtype=wp.vec3f),
-                    faces: wp.array(dtype=wp.int32),
-                    n_tri: wp.int32,
-                    seg_distances: wp.array(dtype=wp.float32),
-                    hits: wp.array(dtype=wp.uint8),
-                    points: wp.array(dtype=wp.vec3f),
-                    fractions: wp.array(dtype=wp.float32),
-            ):
-                seg_id = wp.tid()
-
-                origin = origins[seg_id]
-                direction = directions[seg_id]
-                max_dist = seg_distances[seg_id]
-
-                closest_t = max_dist
-                closest_point = wp.vec3f(0.0, 0.0, 0.0)
-
-                for tri_id in range(n_tri):
-                    base = tri_id * 3
-                    v0 = vertices[faces[base]]
-                    v1 = vertices[faces[base + 1]]
-                    v2 = vertices[faces[base + 2]]
-
-                    edge1 = v1 - v0
-                    edge2 = v2 - v0
-                    h = wp.cross(direction, edge2)
-                    a = wp.dot(edge1, h)
-
-                    if wp.abs(a) < 1e-7:
-                        continue
-
-                    inv_a = 1.0 / a
-                    s = origin - v0
-                    u = wp.dot(s, h) * inv_a
-
-                    if u < 0.0 or u > 1.0:
-                        continue
-
-                    q = wp.cross(s, edge1)
-                    v = wp.dot(direction, q) * inv_a
-
-                    if v < 0.0 or u + v > 1.0:
-                        continue
-
-                    t = wp.dot(edge2, q) * inv_a
-
-                    if t > 1e-6 and t < closest_t:
-                        closest_t = t
-                        closest_point = origin + direction * t
-
-                if closest_t < max_dist:
-                    hits[seg_id] = wp.uint8(1)
-                    points[seg_id] = closest_point
-                    fractions[seg_id] = closest_t / max_dist
-
             seg_dist_wp = wp.from_numpy(distances.astype(np.float32))
 
             wp.launch(
-                segment_intersect_kernel,
+                _segment_intersect_kernel,
                 dim=N,
                 inputs=[
                     origins_wp, directions_wp, vertices_wp, faces_wp,

@@ -201,6 +201,74 @@ if HAVE_WARP:
             points[seg_id] = closest_point
             fractions[seg_id] = closest_t / max_dist
 
+    # 2026-09-15: all electrodes in ONE launch. The triangles of every electrode are concatenated on the device in
+    # assembly insertion order (tri_offsets[e] .. tri_offsets[e + 1]); per segment the electrodes are tried in that
+    # order and the first one hit wins, with the closest triangle within it - exactly what the per-electrode loop in
+    # PyElectrodeAssembly.segment_intersects_surface produced, at 1/18 of the transfers and launches.
+    @wp.kernel
+    def _segment_intersect_multi_kernel(
+            origins: wp.array(dtype=wp.vec3f),
+            directions: wp.array(dtype=wp.vec3f),
+            vertices: wp.array(dtype=wp.vec3f),
+            faces: wp.array(dtype=wp.int32),
+            tri_offsets: wp.array(dtype=wp.int32),
+            n_elec: wp.int32,
+            seg_distances: wp.array(dtype=wp.float32),
+            hits: wp.array(dtype=wp.uint8),
+            points: wp.array(dtype=wp.vec3f),
+            fractions: wp.array(dtype=wp.float32),
+            elec_ids: wp.array(dtype=wp.int32),
+    ):
+        seg_id = wp.tid()
+
+        origin = origins[seg_id]
+        direction = directions[seg_id]
+        max_dist = seg_distances[seg_id]
+
+        for e in range(n_elec):
+            closest_t = max_dist
+            closest_point = wp.vec3f(0.0, 0.0, 0.0)
+
+            for tri_id in range(tri_offsets[e], tri_offsets[e + 1]):
+                base = tri_id * 3
+                v0 = vertices[faces[base]]
+                v1 = vertices[faces[base + 1]]
+                v2 = vertices[faces[base + 2]]
+
+                edge1 = v1 - v0
+                edge2 = v2 - v0
+                h = wp.cross(direction, edge2)
+                a = wp.dot(edge1, h)
+
+                if wp.abs(a) < 1e-7:
+                    continue
+
+                inv_a = 1.0 / a
+                s = origin - v0
+                u = wp.dot(s, h) * inv_a
+
+                if u < 0.0 or u > 1.0:
+                    continue
+
+                q = wp.cross(s, edge1)
+                v = wp.dot(direction, q) * inv_a
+
+                if v < 0.0 or u + v > 1.0:
+                    continue
+
+                t = wp.dot(edge2, q) * inv_a
+
+                if t > 1e-6 and t < closest_t:
+                    closest_t = t
+                    closest_point = origin + direction * t
+
+            if closest_t < max_dist:
+                hits[seg_id] = wp.uint8(1)
+                points[seg_id] = closest_point
+                fractions[seg_id] = closest_t / max_dist
+                elec_ids[seg_id] = e
+                return
+
 def _warp_to_numpy(warp_array):
     """Convert Warp array to numpy, handling different Warp versions"""
     try:
@@ -618,6 +686,23 @@ class PyElectrodeAssembly(object):
         electrode_id_map = {elec_id: idx for idx, elec_id in enumerate(self.electrodes.keys())}
         collision_data['electrode_index_map'] = {v: k for k, v in electrode_id_map.items()}
 
+        # 2026-09-15: one GPU launch for all electrodes (see _segment_intersect_multi_kernel); the per-electrode
+        # loop below is the fallback (no Warp, use_gpu=False, or any failure of the batched path).
+        if use_gpu is None:
+            use_gpu = HAVE_WARP
+        if use_gpu and HAVE_WARP and getattr(self, 'batched_collision', True):
+            try:
+                for i in range(0, N, chunk_size):
+                    end_idx = min(i + chunk_size, N)
+                    hm, hp, hf, ei = self._segment_intersects_gpu_batched(point_start[i:end_idx], point_end[i:end_idx])
+                    collision_data['hit_mask'][i:end_idx] = hm
+                    collision_data['hit_points'][i:end_idx] = hp
+                    collision_data['electrode_ids'][i:end_idx] = ei
+                    collision_data['hit_fractions'][i:end_idx] = hf
+                return collision_data
+            except Exception as e:
+                logger.warning(f"batched GPU segment intersection failed: {e}. Falling back to the per-electrode path.")
+
         for elec_id, electrode in self.electrodes.items():
             elec_idx = electrode_id_map[elec_id]  # Get integer index
 
@@ -640,6 +725,64 @@ class PyElectrodeAssembly(object):
                 collision_data['hit_fractions'][i:end_idx][first_hit] = hit_fracs[first_hit]
 
         return collision_data
+
+    def _warp_batch(self):
+        """The concatenated triangle meshes of all electrodes on the device (insertion order), cached until the
+        electrode set changes: vertices, faces (indices shifted into the concatenated vertex array), per-electrode
+        triangle offsets."""
+        keys = tuple(self.electrodes.keys())
+        cache = getattr(self, '_warp_batch_cache', None)
+        if cache is not None and cache['keys'] == keys:
+            return cache
+        verts, faces, offsets, n_v = [], [], [0], 0
+        for electrode in self.electrodes.values():
+            mesh = electrode._get_trimesh()
+            v = np.asarray(mesh.vertices, dtype=np.float32)
+            f = np.asarray(mesh.faces, dtype=np.int32)
+            verts.append(v)
+            faces.append(f + n_v)
+            n_v += len(v)
+            offsets.append(offsets[-1] + len(f))
+        cache = {'keys': keys,
+                 'vertices': wp.from_numpy(np.ascontiguousarray(np.vstack(verts), dtype=np.float32)),
+                 'faces': wp.from_numpy(np.ascontiguousarray(np.vstack(faces).flatten(), dtype=np.int32)),
+                 'offsets': wp.from_numpy(np.asarray(offsets, dtype=np.int32)),
+                 'n_elec': len(keys), 'n_tri': int(offsets[-1])}
+        self._warp_batch_cache = cache
+        return cache
+
+    def _segment_intersects_gpu_batched(self, point_start, point_end):
+        """All electrodes in one Warp launch; returns (hit_mask, hit_points, hit_fractions, electrode_index).
+        Ray setup identical to PyElectrode._segment_intersects_gpu (float32 arithmetic in the same order)."""
+        point_start = np.asarray(point_start, dtype=np.float32)
+        point_end = np.asarray(point_end, dtype=np.float32)
+        ray_dirs = point_end - point_start
+        distances = np.linalg.norm(ray_dirs, axis=1, keepdims=True)
+        distances = np.maximum(distances, 1e-10)
+        ray_dirs = ray_dirs / distances
+        distances = distances.flatten()
+        batch = self._warp_batch()
+        N = len(point_start)
+        origins_wp = wp.from_numpy(point_start)
+        directions_wp = wp.from_numpy(ray_dirs)
+        seg_dist_wp = wp.from_numpy(distances.astype(np.float32))
+        hit_mask = wp.zeros(N, dtype=wp.uint8)
+        hit_points = wp.zeros(N, dtype=wp.vec3f)
+        hit_fractions = wp.zeros(N, dtype=wp.float32)
+        elec_ids = wp.from_numpy(np.full(N, -1, dtype=np.int32))
+        wp.launch(
+            _segment_intersect_multi_kernel,
+            dim=N,
+            inputs=[origins_wp, directions_wp, batch['vertices'], batch['faces'], batch['offsets'],
+                    wp.int32(batch['n_elec']), seg_dist_wp, hit_mask, hit_points, hit_fractions, elec_ids]
+        )
+        hit_mask_np = _warp_to_numpy(hit_mask).astype(bool)
+        hit_points_np = np.ascontiguousarray(np.asarray(_warp_to_numpy(hit_points), dtype=np.float32).reshape(N, 3))
+        hit_fractions_np = _warp_to_numpy(hit_fractions).astype(np.float32)
+        elec_np = _warp_to_numpy(elec_ids).astype(np.int32)
+        hit_points_np[~hit_mask_np] = np.nan
+        hit_fractions_np[~hit_mask_np] = np.nan
+        return hit_mask_np, hit_points_np, hit_fractions_np, elec_np
 
     def ray_surface_intersection(self, ray_origins, ray_directions, use_gpu=None,
                                  return_first_hit_only=False, chunk_size=None):
@@ -2294,11 +2437,9 @@ class PyElectrode(object):
             hit_fractions_np = hit_fractions_raw.astype(np.float32)
 
             # Convert vec3f structs to (N, 3) float array
-            hit_points_np = np.zeros((N, 3), dtype=np.float32)
-            for i in range(N):
-                hit_points_np[i, 0] = hit_points_raw[i][0]
-                hit_points_np[i, 1] = hit_points_raw[i][1]
-                hit_points_np[i, 2] = hit_points_raw[i][2]
+            # 2026-09-15 audit 7.1: the vec3f array already comes back as (N, 3); the element-wise Python loop that
+            # used to copy it ran ~1e9 scalar index operations over an every-particle run
+            hit_points_np = np.ascontiguousarray(np.asarray(hit_points_raw, dtype=np.float32).reshape(N, 3))
 
             hit_points_np[~hit_mask_np] = np.nan
             hit_fractions_np[~hit_mask_np] = np.nan
